@@ -1,0 +1,47 @@
+project_id = "thedevcv"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "storage", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 17
+
+[studio]
+enabled = true
+port = 54323
+
+[auth]
+enabled = true
+site_url = "http://localhost:5174"
+additional_redirect_urls = ["http://localhost:5174"]
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+enable_confirmations = false
+
+# The Stripe webhook must NOT verify the Supabase JWT — Stripe signs with its own secret.
+[functions.stripe-webhook]
+verify_jwt = false
+
+# Disable gateway-level JWT verification — the edge runtime gateway does not
+# currently support ES256 (asymmetric) JWT signing keys that new Supabase
+# projects ship with. Authentication is enforced inside the function itself
+# via supabase.auth.getUser(token), which validates against the Auth REST API
+# regardless of signing algorithm. Safe to keep even if you switch back to HS256.
+[functions.ai]
+verify_jwt = false
+
+[functions.stripe-checkout]
+verify_jwt = false
+
+# Same ES256 workaround as `ai` above — jobs-proxy validates the JWT inside
+# the function via getUserFromRequest() instead of at the gateway.
+[functions.jobs-proxy]
+verify_jwt = false

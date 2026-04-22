@@ -1,0 +1,519 @@
+@import "tailwindcss";
+
+/* ============================================================
+   The Dev CV — Brand tokens (thedevrealm.com/brand — neo-brutalist)
+   3px borders · rounded-md · hard offset shadows · uppercase display.
+   Two layers below: @theme registers Tailwind utilities (bg-brand,
+   text-muted, border-neo-border…); :root keeps the legacy --color-*
+   tokens so existing bg-[var(--color-bg)] usage keeps working while
+   individual screens migrate to neo components.
+   ============================================================ */
+
+@theme {
+  /* Brand greens */
+  --color-brand:           #0d9668;
+  --color-brand-light:     #2bb885;
+  --color-brand-dark:      #047857;
+
+  /* Surfaces */
+  --color-surface:         #0c1222;
+  --color-surface-light:   #131d33;
+  --color-surface-lighter: #1a2742;
+
+  /* Accent (amber) */
+  --color-accent:          #e6930a;
+  --color-accent-dark:     #c27706;
+
+  /* Neutrals */
+  --color-neo-border:      #3a506e;
+  --color-muted:           #8594b0;
+  --color-subtle:          #4b5c7a;
+
+  /* Radius — brand mandates rounded-md only. Collapse every xl/2xl/3xl
+     utility used across the codebase to the brand radius so any legacy
+     `rounded-xl` automatically renders neo-square. `rounded-full` is left
+     alone for avatars/progress dots. */
+  --radius-lg:  0.5rem;
+  --radius-xl:  0.5rem;
+  --radius-2xl: 0.5rem;
+  --radius-3xl: 0.5rem;
+
+  /* Shadows — replace Tailwind's soft blurred scale with hard neo offsets.
+     Every `shadow-sm/md/lg/xl/2xl` used in the codebase now renders as a
+     brutalist black box-shadow. Arbitrary `shadow-[...]` values bypass
+     this and need per-component edits. */
+  --shadow-sm:  2px 2px 0 #000;
+  --shadow:     3px 3px 0 #000;
+  --shadow-md:  4px 4px 0 #000;
+  --shadow-lg:  5px 5px 0 #000;
+  --shadow-xl:  6px 6px 0 #000;
+  --shadow-2xl: 7px 7px 0 #000;
+}
+
+/* Legacy token aliases — kept so every pre-existing
+   bg-[var(--color-*)] / border-[var(--color-*)] usage in the codebase
+   picks up the new brand palette without touching component code. */
+:root {
+  /* Brand */
+  --color-primary:         #0d9668;
+  --color-primary-hover:   #2bb885;
+  --color-primary-soft:    #0d966814;
+
+  /* Surfaces — remapped from old dark-grey greys onto the brand
+     blue-black palette so existing chrome inherits the new look. */
+  --color-bg:              #080d19;
+  --color-bg-elev:         #0c1222;
+  --color-surface:         #0c1222;
+  --color-surface-hover:   #131d33;
+  --color-border:          #3a506e;
+  --color-border-strong:   #4b5c7a;
+
+  /* Text */
+  --color-text:            #ffffff;
+  --color-text-secondary:  #8594b0;
+  --color-text-muted:      #4b5c7a;
+
+  /* Semantic */
+  --color-success:         #0d9668;
+  --color-warning:         #e6930a;
+  --color-danger:          #ef4444;
+  --color-info:            #3b82f6;
+
+  /* Radius — brand mandates rounded-md only. Collapsed lg/xl
+     so any existing rounded-xl/lg still renders neo-square. */
+  --radius-sm: 0.375rem;
+  --radius:    0.5rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.5rem;
+
+  /* Hard offset shadow scale */
+  --shadow-neo-sm:  2px 2px 0 #000;
+  --shadow-neo:     4px 4px 0 #000;
+  --shadow-neo-md:  5px 5px 0 #000;
+  --shadow-neo-lg:  6px 6px 0 #000;
+  /* Legacy alias — any .glow-primary now renders as a neo shadow
+     so previously "glowy" surfaces look intentionally brutalist. */
+  --shadow-glow:    var(--shadow-neo-md);
+
+  /* Typography */
+  --font-body:    'Inter', system-ui, -apple-system, sans-serif;
+  --font-display: 'Teko', 'Inter', system-ui, sans-serif;
+  --font-mono:    'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+html, body, #root { height: 100%; }
+
+/* Body — brand body-bg with fixed grid overlay (32×32px at 7% opacity). */
+body {
+  margin: 0;
+  background-color: #080d19;
+  background-image:
+    linear-gradient(rgba(58, 80, 110, 0.07) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(58, 80, 110, 0.07) 1px, transparent 1px);
+  background-size: 32px 32px;
+  background-attachment: fixed;
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-feature-settings: 'cv11', 'ss01', 'ss03';
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Fractal-noise grain overlay — pinned behind the UI, never captures
+   clicks. Adds a subtle paper feel on top of the grid. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.035;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='100%25' height='100%25'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+#root { position: relative; z-index: 1; }
+
+/* Heading typography — Teko display, uppercase, extrabold, tracked. */
+h1, h2, h3 {
+  font-family: var(--font-display);
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  font-weight: 800;
+}
+
+.font-display { font-family: var(--font-display); letter-spacing: 0.025em; }
+.font-mono    { font-family: var(--font-mono); }
+
+/* ═══════════════════════════════════════════════════════════
+   NEO COMPONENT CLASSES
+   Applied to any element; opt-in. Existing components keep
+   working — each can migrate individually by swapping class names.
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── Cards ────────────────────────────────────────────── */
+.neo-card {
+  border: 3px solid var(--color-neo-border);
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-neo-md);
+  transition: transform .15s ease, box-shadow .15s ease;
+  position: relative;
+}
+.neo-card:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: var(--shadow-neo-lg);
+}
+
+.neo-card-brand {
+  border: 3px solid var(--color-neo-border);
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-neo-md);
+  transition: transform .15s ease, box-shadow .15s ease;
+  position: relative;
+  overflow: hidden;
+}
+.neo-card-brand::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: var(--color-brand);
+  z-index: 1;
+}
+.neo-card-brand:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: var(--shadow-neo-lg);
+}
+
+/* Pattern reveal on hover — overlays a 16px micro-grid. */
+.neo-card-pattern::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(58, 80, 110, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(58, 80, 110, 0.12) 1px, transparent 1px);
+  background-size: 16px 16px;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity .2s ease;
+  border-radius: var(--radius);
+}
+.neo-card-pattern:hover::after { opacity: 1; }
+
+.neo-stat-card {
+  border: 3px solid var(--color-neo-border);
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-neo-md);
+  padding: 1.25rem;
+  position: relative;
+  overflow: hidden;
+  transition: transform .15s ease, box-shadow .15s ease;
+}
+.neo-stat-card::before {
+  content: '';
+  position: absolute;
+  top: 0; right: 0; bottom: 0;
+  width: 4px;
+  background: var(--color-brand);
+}
+.neo-stat-card:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: var(--shadow-neo-lg);
+}
+
+.neo-filter-card {
+  border: 3px solid var(--color-neo-border);
+  background: var(--color-surface-light);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-neo);
+  padding: 1.25rem;
+}
+
+/* ★ decoration in top-right for "featured" cards. */
+.neo-star::before {
+  content: '★';
+  position: absolute;
+  top: 0.5rem;
+  right: 0.75rem;
+  font-size: 1.25rem;
+  color: var(--color-accent);
+  pointer-events: none;
+  z-index: 2;
+}
+
+/* ── Buttons ──────────────────────────────────────────── */
+.neo-btn {
+  border: 3px solid #000;
+  border-radius: var(--radius);
+  font-family: var(--font-body);
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.025em;
+  transition: transform .1s ease, box-shadow .1s ease, background-color .15s ease;
+  box-shadow: var(--shadow-neo);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  line-height: 1;
+}
+.neo-btn:hover   { transform: translate(-2px, -2px); box-shadow: var(--shadow-neo-lg); }
+.neo-btn:active  { transform: translate(2px, 2px);   box-shadow: 0 0 0 #000; }
+.neo-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: var(--shadow-neo);
+}
+.neo-btn-primary { background: var(--color-brand);        color: #fff; }
+.neo-btn-primary:hover { background: var(--color-brand-light); }
+.neo-btn-accent  { background: var(--color-accent);       color: #000; }
+.neo-btn-accent:hover  { background: var(--color-accent-dark); color: #fff; }
+.neo-btn-ghost   { background: var(--color-surface);      color: #fff; border-color: var(--color-neo-border); }
+.neo-btn-ghost:hover   { background: var(--color-surface-light); }
+.neo-btn-danger  { background: #ef4444;                   color: #fff; }
+.neo-btn-danger:hover  { background: #dc2626; }
+
+/* ── Tags ─────────────────────────────────────────────── */
+.neo-tag {
+  display: inline-block;
+  padding: 0.25rem 0.75rem;
+  border: 2px solid;
+  border-radius: var(--radius);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  line-height: 1.2;
+}
+.neo-tag-brand  { background: var(--color-brand);        color: #fff; border-color: #000; }
+.neo-tag-accent { background: var(--color-accent);       color: #000; border-color: #000; }
+.neo-tag-ghost  { background: var(--color-surface-light); color: var(--color-muted); border-color: var(--color-neo-border); }
+.neo-tag-rotate { transform: rotate(-2deg); }
+
+/* ── Inputs ───────────────────────────────────────────── */
+.neo-input,
+.neo-select {
+  width: 100%;
+  border: 3px solid var(--color-neo-border);
+  background: var(--color-surface);
+  color: #fff;
+  border-radius: var(--radius);
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+.neo-input::placeholder { color: var(--color-subtle); }
+.neo-input:focus,
+.neo-select:focus {
+  outline: none;
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 3px rgba(13, 150, 104, 0.25);
+}
+
+/* ── Table ────────────────────────────────────────────── */
+.neo-table {
+  width: 100%;
+  border-collapse: collapse;
+  border: 3px solid var(--color-neo-border);
+  box-shadow: var(--shadow-neo);
+  background: var(--color-surface);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.neo-table th {
+  background: var(--color-surface-lighter);
+  color: #fff;
+  padding: 0.75rem 1rem;
+  text-align: left;
+  font-size: 0.75rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  border-bottom: 3px solid var(--color-neo-border);
+}
+.neo-table td {
+  padding: 0.75rem 1rem;
+  color: var(--color-muted);
+  font-size: 0.875rem;
+  border-bottom: 1px solid var(--color-neo-border);
+}
+.neo-table tbody tr:last-child td { border-bottom: none; }
+.neo-table tbody tr:hover { background: var(--color-surface-light); }
+
+/* ── Toggle group ─────────────────────────────────────── */
+.neo-toggle {
+  display: inline-flex;
+  border: 3px solid var(--color-neo-border);
+  border-radius: var(--radius);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-neo);
+  overflow: hidden;
+}
+.neo-toggle-btn {
+  padding: 0.5rem 1rem;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  background: transparent;
+  color: var(--color-muted);
+  transition: background .15s ease, color .15s ease;
+  cursor: pointer;
+}
+.neo-toggle-btn:not(:last-child) { border-right: 3px solid var(--color-neo-border); }
+.neo-toggle-btn-active { background: var(--color-brand); color: #fff; }
+.neo-toggle-btn:not(.neo-toggle-btn-active):hover { background: var(--color-surface-light); color: #fff; }
+
+/* ── Decorative ──────────────────────────────────────── */
+.neo-header-bar {
+  background:
+    repeating-linear-gradient(45deg, rgba(255,255,255,0.08) 0, rgba(255,255,255,0.08) 1px, transparent 1px, transparent 8px),
+    linear-gradient(135deg, var(--color-brand) 0%, var(--color-brand-dark) 100%);
+  color: #fff;
+  padding: 0.625rem 1rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  font-size: 0.75rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.neo-divider {
+  position: relative;
+  border: none;
+  border-top: 3px dashed var(--color-neo-border);
+  margin: 1rem 0;
+}
+.neo-divider::before {
+  content: '✂';
+  position: absolute;
+  top: -14px;
+  left: 20px;
+  background: var(--color-surface);
+  padding: 0 6px;
+  color: var(--color-muted);
+  font-size: 14px;
+}
+
+.neo-stripe-pattern {
+  background-image: repeating-linear-gradient(
+    45deg,
+    transparent,
+    transparent 10px,
+    rgba(58, 80, 110, 0.1) 10px,
+    rgba(58, 80, 110, 0.1) 20px
+  );
+}
+
+.neo-price {
+  font-family: var(--font-display);
+  font-weight: 700;
+  color: #fff;
+  letter-spacing: -0.01em;
+  position: relative;
+  display: inline-block;
+  border-bottom: 4px solid var(--color-accent);
+  padding-bottom: 0.125rem;
+  line-height: 1;
+}
+
+.neo-hero {
+  background: linear-gradient(135deg, var(--color-surface) 0%, #080d19 100%);
+  border: 3px solid var(--color-neo-border);
+  box-shadow: var(--shadow-neo-lg);
+  position: relative;
+  overflow: hidden;
+}
+.neo-hero::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(58, 80, 110, 0.12) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(58, 80, 110, 0.12) 1px, transparent 1px);
+  background-size: 32px 32px;
+  pointer-events: none;
+}
+
+/* ── Gradient text ────────────────────────────────────── */
+.text-gradient {
+  background: linear-gradient(90deg, var(--color-brand) 0%, var(--color-brand-light) 50%, var(--color-brand) 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  background-size: 200% 100%;
+}
+.hero-gradient-text {
+  background: linear-gradient(135deg, var(--color-brand) 0%, var(--color-brand-light) 50%, var(--color-accent) 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
+  color: transparent;
+  background-size: 200% 200%;
+}
+
+/* ── Animations ───────────────────────────────────────── */
+@keyframes fade-in-up { from { opacity: 0; transform: translateY(16px); } to { opacity: 1; transform: translateY(0); } }
+.animate-fade-in-up { animation: fade-in-up .5s ease-out; }
+
+@keyframes shimmer { 0% { background-position: -200% 0; } 100% { background-position: 200% 0; } }
+.animate-shimmer {
+  background: linear-gradient(90deg, var(--color-surface) 0%, var(--color-surface-light) 50%, var(--color-surface) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2.5s infinite linear;
+}
+
+@keyframes neo-float    { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-5px); } }
+.animate-neo-float      { animation: neo-float 2.5s ease-in-out infinite; }
+
+@keyframes bounce-gentle { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+.animate-bounce-gentle   { animation: bounce-gentle 1.5s ease-in-out infinite; }
+
+@keyframes ai-scan {
+  0%   { left: -40%; width: 40%; }
+  50%  { left: 40%;  width: 30%; }
+  100% { left: 110%; width: 40%; }
+}
+
+@keyframes ping-slow    { 0% { transform: scale(1); opacity: .9; } 100% { transform: scale(2); opacity: 0; } }
+.animate-ping-slow      { animation: ping-slow 2s ease-out infinite; }
+
+@keyframes gradient-shift { 0%, 100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+.animate-gradient-shift   { animation: gradient-shift 3s ease infinite; }
+
+/* ── Retained from pre-brand CSS ──────────────────────── */
+@keyframes slide-in  { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+.animate-slide-in    { animation: slide-in 0.2s ease-out; }
+
+@keyframes pulse-soft { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+.animate-pulse-soft   { animation: pulse-soft 2s ease-in-out infinite; }
+
+/* Legacy bg-grid utility — repurposed to the brand grid density. */
+.bg-grid {
+  background-image:
+    linear-gradient(to right,  rgba(58, 80, 110, 0.1) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(58, 80, 110, 0.1) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+
+/* Scrollbars */
+::-webkit-scrollbar        { width: 8px; height: 8px; }
+::-webkit-scrollbar-track  { background: transparent; }
+::-webkit-scrollbar-thumb  { background: var(--color-neo-border); border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: var(--color-brand); }
+
+/* Focus ring — brand green, thick, squared for neo */
+*:focus-visible {
+  outline: 3px solid var(--color-brand);
+  outline-offset: 2px;
+  border-radius: 0;
+}
+
+::selection { background: rgba(13, 150, 104, .3); color: #fff; }
+
+/* .glow-primary alias — formerly a soft glow, now a hard neo shadow. */
+.glow-primary { box-shadow: var(--shadow-neo-md); }
