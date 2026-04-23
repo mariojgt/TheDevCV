@@ -1,17 +1,19 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Plus, Trash2, Eye, Download, Brain, ChevronDown, Palette, Coins, Sparkles, FileText, Wand2, Target, Layers, CheckCircle2, GripVertical, RefreshCw, Braces, MessageSquare, Copy, ClipboardList, TrendingUp, AlertCircle } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Plus, Trash2, Eye, Download, Brain, ChevronDown, Palette, Coins, Sparkles, FileText, Wand2, Target, Layers, CheckCircle2, GripVertical, RefreshCw, Braces, MessageSquare, Copy, ClipboardList, TrendingUp, AlertCircle, Globe, Info } from 'lucide-react';
 import { useCV } from '../hooks/useCV';
 import { useApp } from '../../../contexts/AppContext';
 import { useToast } from '../../../components/ui/Toast';
 import { InsufficientCreditsError } from '../../../lib/ai-client';
-import { atsScore, optimizeCV, improveSection, draftEntryFromText, generateCoverLetter, generateInterviewQuestions, type CVSuggestion, type ATSGapAnalysis, type DraftedExperience, type DraftedProject, type InterviewQuestion } from '../lib/ai';
+import { atsScore, optimizeCV, improveSection, draftEntryFromText, draftProjectFromUrl, draftSummaryFromCV, beautifyText, generateCoverLetter, generateInterviewQuestions, type CVSuggestion, type ATSGapAnalysis, type DraftedExperience, type DraftedProject, type InterviewQuestion } from '../lib/ai';
 import { generateClassicPDF, generateModernPDF, generateMinimalPDF, generateProfessionalPDF, generateExecutivePDF, generateCorporatePDF, generateNeoPDF, generateNeoDarkPDF } from '../lib/pdf';
 import OptimizePanel from '../components/OptimizePanel';
 import ImportFromCV from '../components/ImportFromCV';
 import ATSAnalysis from '../components/ATSAnalysis';
 import QualityChecks from '../components/QualityChecks';
 import SharePanel from '../components/SharePanel';
+import PortfolioBuilder from '../components/PortfolioBuilder';
 import { toJSONResume, downloadJSONResume } from '../lib/jsonResume';
 import { toPlainText, downloadPlainText } from '../lib/plainText';
 import PlanBadge from '../../../components/PlanBadge';
@@ -25,8 +27,9 @@ import CVTemplateCorporate from '../components/CVTemplateCorporate';
 import CVTemplateNeo from '../components/CVTemplateNeo';
 import CVTemplateNeoDark from '../components/CVTemplateNeoDark';
 import { supabase } from '../../../lib/supabase';
-import type { CVProfile, CVExperience, CVEducation, CVSkill, CVCertification, CVProject, CVLanguage } from '../types';
-import { SKILL_CATEGORIES, PROFICIENCY_LEVELS, LANGUAGE_LEVELS, CAREER_STAGES, INDUSTRIES } from '../types';
+import type { CVProfile, CVExperience, CVEducation, CVSkill, CVCertification, CVProject, CVLanguage, CVGapReason } from '../types';
+import { SKILL_CATEGORIES, PROFICIENCY_LEVELS, LANGUAGE_LEVELS, CAREER_STAGES, INDUSTRIES, GAP_PRESETS } from '../types';
+import { detectGaps, detectShortTenurePattern, layoffNote, formatMonths, formatMonthYear } from '../lib/gapAnalysis';
 
 type TemplateName = 'classic' | 'modern' | 'minimal' | 'professional' | 'executive' | 'corporate' | 'neo' | 'neo-dark';
 
@@ -41,13 +44,14 @@ const TEMPLATES: { id: TemplateName; label: string; desc: string }[] = [
   { id: 'neo-dark', label: 'Neo Dark', desc: 'Deep navy + brand green — dark mode' },
 ];
 
-type EditorTab = 'edit' | 'design' | 'ai-review' | 'tailor';
+type EditorTab = 'edit' | 'design' | 'ai-review' | 'tailor' | 'portfolio';
 
 const TABS: { id: EditorTab; label: string; icon: typeof FileText }[] = [
   { id: 'edit',      label: 'Edit',      icon: FileText },
   { id: 'design',    label: 'Design',    icon: Palette },
   { id: 'ai-review', label: 'AI Review', icon: Wand2 },
   { id: 'tailor',    label: 'Tailor',    icon: Target },
+  { id: 'portfolio', label: 'Portfolio', icon: Globe },
 ];
 
 const AI_STEPS = [
@@ -311,35 +315,129 @@ function scoreBullet(raw: string): BulletScore {
   return { score, label, tips };
 }
 
-function BulletImpactDot({ text }: { text: string }) {
-  const { score, label, tips } = scoreBullet(text);
-  if (!text.trim()) return null;
+/**
+ * Compact quality panel shown under each Experience entry's achievements.
+ * Replaces the old row of hover-only impact dots with an action-first card:
+ *
+ *   • A one-line summary bar showing strong-vs-total ratio.
+ *   • An expandable list of the weak bullets only — each with its own tips
+ *     and a "Fix with AI" button that rewrites that single bullet via the
+ *     existing `improveSection('achievements', …)` endpoint.
+ *   • Strong bullets are counted but not listed, so the card stays short
+ *     on polished CVs.
+ *
+ * The card auto-expands when any bullet is weak so problems aren't hidden
+ * behind a click; users can collapse it once they're satisfied.
+ */
+function BulletHealth({
+  bullets,
+  onFix,
+  fixingIndex,
+  fixCost,
+  fixDisabled,
+}: {
+  bullets: string[];
+  onFix: (bulletIndex: number, original: string) => void;
+  fixingIndex: number | null;
+  fixCost: number;
+  fixDisabled: boolean;
+}) {
+  const graded = bullets
+    .map((text, index) => ({ text, index, ...scoreBullet(text) }))
+    .filter(b => b.text.trim());
 
-  const colors = [
-    'border-red-500 bg-red-500',
-    'border-red-500 bg-red-500',
-    'border-orange-400 bg-orange-400',
-    'border-yellow-400 bg-yellow-400',
-    'border-brand bg-brand',
-  ] as const;
-  const dot = colors[score] ?? colors[0];
+  const weak = graded.filter(b => b.score <= 2);
+  const strongCount = graded.length - weak.length;
+  const [expanded, setExpanded] = useState(weak.length > 0);
+
+  if (graded.length === 0) return null;
+
+  const allStrong = weak.length === 0;
+  const hasPoor = weak.some(b => b.score <= 1);
+  const barColor = allStrong ? 'bg-brand' : hasPoor ? 'bg-red-400' : 'bg-amber-400';
+  const scorePct = Math.round((strongCount / graded.length) * 100);
 
   return (
-    <span className="group relative inline-flex items-center">
-      <span
-        className={`w-2 h-2 rounded-full border ${dot} shrink-0`}
-        aria-label={`Bullet quality: ${label}`}
-      />
-      {/* tooltip */}
-      {tips.length > 0 && (
-        <span className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1.5 z-50 hidden group-hover:flex flex-col gap-1 bg-surface border-2 border-neo-border rounded px-2.5 py-1.5 min-w-50 shadow-lg pointer-events-none">
-          <span className="text-[10px] font-extrabold uppercase tracking-wide text-muted">{label}</span>
-          {tips.map((t, i) => (
-            <span key={i} className="text-[11px] text-white leading-tight">· {t}</span>
-          ))}
-        </span>
+    <div className="rounded-md border-2 border-neo-border/60 bg-surface/40">
+      <button
+        type="button"
+        onClick={() => setExpanded(v => !v)}
+        className="w-full flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-surface/60 rounded-md transition-colors"
+      >
+        <span className="font-bold uppercase tracking-wide text-muted">Bullet health</span>
+        <div className="flex-1 min-w-0 flex items-center gap-2">
+          <div className="relative flex-1 max-w-[90px] h-1 rounded-full bg-neo-border/50 overflow-hidden">
+            <div
+              className={`absolute inset-y-0 left-0 ${barColor} transition-all`}
+              style={{ width: `${scorePct}%` }}
+            />
+          </div>
+          <span className="text-white font-medium whitespace-nowrap">
+            {strongCount} of {graded.length} strong
+          </span>
+        </div>
+        <ChevronDown className={`w-3.5 h-3.5 text-muted shrink-0 transition-transform ${expanded ? 'rotate-180' : ''}`} />
+      </button>
+
+      {expanded && (
+        <div className="border-t border-neo-border/40 px-3 py-2 space-y-2">
+          {allStrong ? (
+            <div className="text-[11px] text-brand-light flex items-center gap-1.5">
+              <CheckCircle2 className="w-3.5 h-3.5" /> All bullets look strong — nicely done.
+            </div>
+          ) : (
+            <>
+              {weak.map((b) => {
+                const isFixing = fixingIndex === b.index;
+                const labelColor = b.score <= 1 ? 'text-red-400' : 'text-amber-400';
+                return (
+                  <div
+                    key={b.index}
+                    className="rounded-sm border border-neo-border/40 bg-surface-light/30 p-2"
+                  >
+                    <div className="flex items-center gap-1.5 mb-1">
+                      <span className={`text-[10px] font-extrabold uppercase tracking-wide ${labelColor}`}>
+                        {b.label}
+                      </span>
+                      <span className="text-[10px] text-subtle">#{b.index + 1}</span>
+                    </div>
+                    <div className="text-[11px] text-white/90 leading-snug mb-1.5 line-clamp-2">
+                      "{b.text}"
+                    </div>
+                    <ul className="text-[10px] text-muted space-y-0.5 mb-2">
+                      {b.tips.map((t, ti) => <li key={ti}>· {t}</li>)}
+                    </ul>
+                    <button
+                      type="button"
+                      onClick={() => onFix(b.index, b.text)}
+                      disabled={isFixing || fixDisabled}
+                      title={fixDisabled ? `Not enough credits (need ${fixCost})` : 'Rewrite this bullet with AI'}
+                      className="neo-btn neo-btn-ghost px-2.5 py-1 text-[11px] inline-flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {isFixing ? (
+                        <><Loader2 className="w-3 h-3 animate-spin" /> Rewriting…</>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3 h-3 text-brand-light" /> Fix with AI
+                          <span className="inline-flex items-center gap-0.5 text-[10px] text-brand-light/80">
+                            <Coins className="w-3 h-3" />{fixCost}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                );
+              })}
+              {strongCount > 0 && (
+                <div className="text-[10px] text-muted pt-0.5">
+                  {strongCount} strong bullet{strongCount === 1 ? '' : 's'} hidden
+                </div>
+              )}
+            </>
+          )}
+        </div>
       )}
-    </span>
+    </div>
   );
 }
 
@@ -368,16 +466,43 @@ function FieldTip({ children }: { children: React.ReactNode }) {
   );
 }
 
-function Section({ id, title, count, defaultOpen = true, children }: { id?: string; title: string; count?: number; defaultOpen?: boolean; children: React.ReactNode }) {
-  const [open, setOpen] = useState(defaultOpen);
+/**
+ * Section accepts either (a) controlled `open` + `onToggle` props — used by
+ * CVEditor for the single-section-at-a-time accordion — or (b) falls back to
+ * internal `defaultOpen` state when those are omitted. Keeping the
+ * uncontrolled form means callers outside the editor don't need to track
+ * state just to render a collapsible card.
+ *
+ * `overflow-hidden` is intentionally NOT on the outer card: chip popovers
+ * inside Skills / Languages / Certifications are portaled and need the card
+ * not to establish a clipping ancestor. The header button gets `rounded-t-md`
+ * so its hover background still clips against the card's top corners.
+ */
+function Section({
+  id, title, count, defaultOpen = true, open, onToggle, children,
+}: {
+  id?: string;
+  title: string;
+  count?: number;
+  defaultOpen?: boolean;
+  open?: boolean;
+  onToggle?: () => void;
+  children: React.ReactNode;
+}) {
+  const [internalOpen, setInternalOpen] = useState(defaultOpen);
+  const isOpen = open ?? internalOpen;
+  const toggle = onToggle ?? (() => setInternalOpen(v => !v));
   return (
-    <div id={id} className="neo-card overflow-hidden scroll-mt-3">
-      <button type="button" onClick={() => setOpen(!open)}
-        className="w-full flex items-center justify-between p-4 hover:bg-surface/50 transition-colors">
+    <div id={id} className="neo-card scroll-mt-3">
+      <button
+        type="button"
+        onClick={toggle}
+        className="w-full flex items-center justify-between p-4 rounded-t-md hover:bg-surface/50 transition-colors"
+      >
         <span className="text-xs font-extrabold uppercase tracking-wide text-white">{title} {count != null && <span className="text-muted font-normal normal-case">({count})</span>}</span>
-        <ChevronDown className={`w-4 h-4 text-muted transition-transform ${open ? 'rotate-180' : ''}`} />
+        <ChevronDown className={`w-4 h-4 text-muted transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
-      {open && <div className="px-4 pb-4 border-t border-neo-border pt-4">{children}</div>}
+      {isOpen && <div className="px-4 pb-4 border-t border-neo-border pt-4">{children}</div>}
     </div>
   );
 }
@@ -529,6 +654,84 @@ function EmptyDraftPrompt({
 }
 
 /**
+ * Surfaces employment gaps detected between consecutive roles and offers a
+ * one-click "Insert leave entry" with a preset label chosen from a dropdown.
+ * The panel disappears automatically once every gap is accounted for because
+ * `detectGaps` skips rows where `gap_reason` is set.
+ *
+ * Guidance is from the "Next Job Now — resume gap" episode: a clearly labeled
+ * leave reframes silence; it's up to the candidate to own the period
+ * instead of leaving recruiters to guess the worst.
+ */
+function GapAnalysisPanel({
+  gaps, experience, onInsert,
+}: {
+  gaps: import('../lib/gapAnalysis').DetectedGap[];
+  experience: CVExperience[];
+  onInsert: (reason: CVGapReason, from: Date, to: Date) => void;
+}) {
+  // One chosen preset per gap (keyed by the pair of flanking role indexes)
+  // so the user's dropdown selection survives between re-renders as they
+  // edit adjacent fields.
+  const [presets, setPresets] = useState<Record<string, CVGapReason>>({});
+  const keyFor = (g: import('../lib/gapAnalysis').DetectedGap) => `${g.afterIndex}-${g.from.getTime()}-${g.to.getTime()}`;
+  const rolesRef = experience; // just a readability alias
+  return (
+    <div className="rounded-md border-2 border-amber-500/50 bg-amber-500/10 p-3 space-y-2.5">
+      <div className="flex items-center gap-2">
+        <AlertCircle className="w-4 h-4 text-amber-300" />
+        <span className="text-xs font-extrabold uppercase tracking-wide text-amber-200">
+          {gaps.length} employment gap{gaps.length === 1 ? '' : 's'} detected
+        </span>
+      </div>
+      <p className="text-[11px] text-amber-100/80 leading-snug">
+        Label each gap so recruiters see the period is accounted for. A specific leave
+        reads far better than a silent date hole — they can't politely ask about it anyway.
+      </p>
+      <div className="space-y-2">
+        {gaps.map(g => {
+          const key = keyFor(g);
+          const chosen = presets[key] ?? 'family_care';
+          const older = rolesRef[g.afterIndex + 0]; // newer role (what comes after the gap)
+          const bridge = older?.role || 'next role';
+          return (
+            <div key={key} className="rounded-sm bg-surface/60 border border-neo-border/60 p-2">
+              <div className="text-[11px] text-white mb-1.5">
+                <strong>{formatMonths(g.months)}</strong>{' '}
+                <span className="text-muted">before</span>{' '}
+                <em className="text-amber-200">{bridge}</em>{' '}
+                <span className="text-muted">({formatMonthYear(g.from)} → {formatMonthYear(g.to)})</span>
+              </div>
+              <div className="flex items-center gap-2 flex-wrap">
+                <select
+                  value={chosen}
+                  onChange={e => setPresets(p => ({ ...p, [key]: e.target.value as CVGapReason }))}
+                  className="neo-input px-2 py-1 text-xs"
+                >
+                  {GAP_PRESETS.map(p => (
+                    <option key={p.reason} value={p.reason}>{p.label}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => onInsert(chosen, g.from, g.to)}
+                  className="neo-btn neo-btn-ghost px-3 py-1 text-[11px] inline-flex items-center gap-1.5"
+                >
+                  <Plus className="w-3 h-3" /> Insert leave entry
+                </button>
+                <span className="text-[10px] text-subtle">
+                  {GAP_PRESETS.find(p => p.reason === chosen)?.hint}
+                </span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+/**
  * Horizontal pill rail that sits at the top of the editor column. Each pill
  * jumps to the matching section and shows a status dot: emerald (filled),
  * amber (partial), rose (empty). Sticky within the scrollable editor panel.
@@ -580,6 +783,41 @@ const PROFICIENCY_FILL: Record<CVSkill['proficiency'], number> = {
   beginner: 1, intermediate: 2, advanced: 3, expert: 4,
 };
 
+/**
+ * Track an anchor element's screen-space rect so we can position a popover
+ * via `position: fixed` outside the chip's stacking context and overflow
+ * parents. Updates on scroll (capture phase — catches inner scrollers too)
+ * and resize. The popover is then portaled to `document.body`, which is what
+ * finally lets it escape the editor column's `md:overflow-y-auto`.
+ */
+function usePopoverAnchor(
+  open: boolean,
+  anchorRef: React.RefObject<HTMLElement | null>,
+  popoverWidth: number,
+): { top: number; left: number } | null {
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null);
+  useEffect(() => {
+    if (!open) { setPos(null); return; }
+    const update = () => {
+      const el = anchorRef.current;
+      if (!el) return;
+      const r = el.getBoundingClientRect();
+      // Clamp so a chip near the right edge keeps its popover on-screen.
+      const maxLeft = window.innerWidth - popoverWidth - 12;
+      const left = Math.max(8, Math.min(r.left, maxLeft));
+      setPos({ top: r.bottom + 6, left });
+    };
+    update();
+    window.addEventListener('scroll', update, true);
+    window.addEventListener('resize', update);
+    return () => {
+      window.removeEventListener('scroll', update, true);
+      window.removeEventListener('resize', update);
+    };
+  }, [open, anchorRef, popoverWidth]);
+  return pos;
+}
+
 function ProficiencyDots({ level, dotClass }: { level: CVSkill['proficiency']; dotClass: string }) {
   const filled = PROFICIENCY_FILL[level];
   return (
@@ -605,7 +843,9 @@ function SkillChip({
   autoOpen?: boolean;
 }) {
   const [editing, setEditing] = useState(autoOpen || !skill.name);
-  const wrapperRef = useRef<HTMLDivElement>(null);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const pos = usePopoverAnchor(editing, anchorRef, 256);
   const styles = styleFor(skill.category);
 
   // Close popover, dropping empty-name chips so we don't leave dead rows.
@@ -617,7 +857,10 @@ function SkillChip({
   useEffect(() => {
     if (!editing) return;
     const onDown = (e: MouseEvent) => {
-      if (!wrapperRef.current?.contains(e.target as Node)) close();
+      const t = e.target as Node;
+      if (anchorRef.current?.contains(t)) return;
+      if (popoverRef.current?.contains(t)) return;
+      close();
     };
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
     window.addEventListener('mousedown', onDown);
@@ -629,9 +872,71 @@ function SkillChip({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editing, skill.name]);
 
+  const popover = editing && pos && createPortal(
+    <div
+      ref={popoverRef}
+      style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 60 }}
+      className="w-64 rounded-md border-2 border-neo-border bg-surface shadow-xl p-2.5 space-y-2"
+    >
+      <input
+        autoFocus
+        type="text"
+        value={skill.name}
+        onChange={e => onChange({ name: e.target.value })}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); close(); } }}
+        placeholder="Skill name"
+        className="w-full neo-input px-2.5 py-1.5 text-sm"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <label className="flex flex-col gap-0.5 min-w-0">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Category</span>
+          <select
+            value={skill.category}
+            onChange={e => onChange({ category: e.target.value })}
+            className="neo-input px-2 py-1 text-xs"
+          >
+            {SKILL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+          </select>
+        </label>
+        <label className="flex flex-col gap-0.5 min-w-0">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Level</span>
+          <select
+            value={skill.proficiency}
+            onChange={e => onChange({ proficiency: e.target.value as CVSkill['proficiency'] })}
+            className="neo-input px-2 py-1 text-xs"
+          >
+            {PROFICIENCY_LEVELS.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </label>
+      </div>
+      <label className="flex flex-col gap-0.5">
+        <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Years (optional)</span>
+        <input
+          type="number"
+          min={0}
+          max={50}
+          value={skill.years ?? ''}
+          onChange={e => onChange({ years: e.target.value === '' ? null : Number(e.target.value) })}
+          placeholder="e.g. 3"
+          className="neo-input px-2 py-1 text-xs"
+        />
+      </label>
+      <div className="flex items-center justify-between pt-1">
+        <button type="button" onClick={onDelete} className="text-[11px] text-red-400 hover:text-red-300 inline-flex items-center gap-1">
+          <Trash2 className="w-3 h-3" /> Delete
+        </button>
+        <button type="button" onClick={close} className="text-[11px] text-muted hover:text-white">
+          Done
+        </button>
+      </div>
+    </div>,
+    document.body,
+  );
+
   return (
-    <div ref={wrapperRef} className="relative inline-block">
+    <>
       <button
+        ref={anchorRef}
         type="button"
         onClick={() => setEditing(v => !v)}
         className={`group inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-full border-2 text-xs font-medium transition ${styles.border} ${styles.bg} ${styles.text} hover:brightness-125 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand`}
@@ -639,70 +944,8 @@ function SkillChip({
         <span className="truncate max-w-[10rem]">{skill.name || 'New skill'}</span>
         <ProficiencyDots level={skill.proficiency} dotClass={styles.dot} />
       </button>
-      {editing && (
-        <div className="absolute top-full left-0 mt-1.5 z-30 w-64 rounded-md border-2 border-neo-border bg-surface shadow-xl p-2.5 space-y-2">
-          <input
-            autoFocus
-            type="text"
-            value={skill.name}
-            onChange={e => onChange({ name: e.target.value })}
-            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); close(); } }}
-            placeholder="Skill name"
-            className="w-full neo-input px-2.5 py-1.5 text-sm"
-          />
-          <div className="grid grid-cols-2 gap-2">
-            <label className="flex flex-col gap-0.5 min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Category</span>
-              <select
-                value={skill.category}
-                onChange={e => onChange({ category: e.target.value })}
-                className="neo-input px-2 py-1 text-xs"
-              >
-                {SKILL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
-            </label>
-            <label className="flex flex-col gap-0.5 min-w-0">
-              <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Level</span>
-              <select
-                value={skill.proficiency}
-                onChange={e => onChange({ proficiency: e.target.value as CVSkill['proficiency'] })}
-                className="neo-input px-2 py-1 text-xs"
-              >
-                {PROFICIENCY_LEVELS.map(p => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </label>
-          </div>
-          <label className="flex flex-col gap-0.5">
-            <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Years (optional)</span>
-            <input
-              type="number"
-              min={0}
-              max={50}
-              value={skill.years ?? ''}
-              onChange={e => onChange({ years: e.target.value === '' ? null : Number(e.target.value) })}
-              placeholder="e.g. 3"
-              className="neo-input px-2 py-1 text-xs"
-            />
-          </label>
-          <div className="flex items-center justify-between pt-1">
-            <button
-              type="button"
-              onClick={onDelete}
-              className="text-[11px] text-red-400 hover:text-red-300 inline-flex items-center gap-1"
-            >
-              <Trash2 className="w-3 h-3" /> Delete
-            </button>
-            <button
-              type="button"
-              onClick={close}
-              className="text-[11px] text-muted hover:text-white"
-            >
-              Done
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
+      {popover}
+    </>
   );
 }
 
@@ -832,6 +1075,381 @@ function SkillsEditor({
   );
 }
 
+// ─── Language chip editor ─────────────────────────────────────────────────
+// Per-level palette: native carries the full brand accent (strongest signal),
+// stepping down through blue/teal/amber to slate for basic. Visual weight
+// follows self-reported proficiency so recruiters scan the list at a glance.
+const LANGUAGE_LEVEL_STYLES: Record<CVLanguage['proficiency'], { dot: string; border: string; bg: string; text: string; label: string }> = {
+  native:       { dot: 'bg-brand',       border: 'border-brand/40',       bg: 'bg-brand/10',       text: 'text-brand-light', label: 'Native' },
+  fluent:       { dot: 'bg-teal-400',    border: 'border-teal-400/40',    bg: 'bg-teal-400/10',    text: 'text-teal-300',    label: 'Fluent' },
+  professional: { dot: 'bg-blue-400',    border: 'border-blue-400/40',    bg: 'bg-blue-400/10',    text: 'text-blue-300',    label: 'Professional' },
+  intermediate: { dot: 'bg-amber-400',   border: 'border-amber-400/40',   bg: 'bg-amber-400/10',   text: 'text-amber-300',   label: 'Intermediate' },
+  basic:        { dot: 'bg-slate-400',   border: 'border-slate-400/40',   bg: 'bg-slate-400/10',   text: 'text-slate-300',   label: 'Basic' },
+};
+
+const LANGUAGE_FILL: Record<CVLanguage['proficiency'], number> = {
+  basic: 1, intermediate: 2, professional: 3, fluent: 4, native: 5,
+};
+
+function LanguageDots({ level, dotClass }: { level: CVLanguage['proficiency']; dotClass: string }) {
+  const filled = LANGUAGE_FILL[level];
+  return (
+    <span className="inline-flex items-center gap-0.5" aria-label={`${level} proficiency`}>
+      {[1, 2, 3, 4, 5].map(i => (
+        <span key={i} className={`w-1 h-1 rounded-full ${i <= filled ? dotClass : 'bg-neo-border'}`} />
+      ))}
+    </span>
+  );
+}
+
+function LanguageChip({
+  lang, onChange, onDelete, autoOpen = false,
+}: {
+  lang: CVLanguage;
+  onChange: (patch: Partial<CVLanguage>) => void;
+  onDelete: () => void;
+  autoOpen?: boolean;
+}) {
+  const [editing, setEditing] = useState(autoOpen || !lang.language);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const pos = usePopoverAnchor(editing, anchorRef, 256);
+  const styles = LANGUAGE_LEVEL_STYLES[lang.proficiency];
+
+  const close = () => {
+    if (!lang.language.trim()) { onDelete(); return; }
+    setEditing(false);
+  };
+
+  useEffect(() => {
+    if (!editing) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (anchorRef.current?.contains(t)) return;
+      if (popoverRef.current?.contains(t)) return;
+      close();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, lang.language]);
+
+  const popover = editing && pos && createPortal(
+    <div
+      ref={popoverRef}
+      style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 60 }}
+      className="w-64 rounded-md border-2 border-neo-border bg-surface shadow-xl p-2.5 space-y-2"
+    >
+      <input
+        autoFocus
+        type="text"
+        value={lang.language}
+        onChange={e => onChange({ language: e.target.value })}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); close(); } }}
+        placeholder="Language (e.g. Spanish)"
+        className="w-full neo-input px-2.5 py-1.5 text-sm"
+      />
+      <label className="flex flex-col gap-0.5">
+        <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Proficiency</span>
+        <select
+          value={lang.proficiency}
+          onChange={e => onChange({ proficiency: e.target.value as CVLanguage['proficiency'] })}
+          className="neo-input px-2 py-1 text-xs"
+        >
+          {LANGUAGE_LEVELS.map(l => (
+            <option key={l} value={l}>{LANGUAGE_LEVEL_STYLES[l].label}</option>
+          ))}
+        </select>
+      </label>
+      <div className="flex items-center justify-between pt-1">
+        <button type="button" onClick={onDelete} className="text-[11px] text-red-400 hover:text-red-300 inline-flex items-center gap-1">
+          <Trash2 className="w-3 h-3" /> Delete
+        </button>
+        <button type="button" onClick={close} className="text-[11px] text-muted hover:text-white">Done</button>
+      </div>
+    </div>,
+    document.body,
+  );
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        onClick={() => setEditing(v => !v)}
+        className={`group inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-full border-2 text-xs font-medium transition ${styles.border} ${styles.bg} ${styles.text} hover:brightness-125 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand`}
+      >
+        <span className="truncate max-w-[10rem]">{lang.language || 'New language'}</span>
+        <LanguageDots level={lang.proficiency} dotClass={styles.dot} />
+      </button>
+      {popover}
+    </>
+  );
+}
+
+function LanguagesEditor({
+  languages, setLanguages,
+}: {
+  languages: CVLanguage[];
+  setLanguages: React.Dispatch<React.SetStateAction<CVLanguage[]>>;
+}) {
+  const [bulkInput, setBulkInput] = useState('');
+  const [autoOpenId, setAutoOpenId] = useState<number | null>(null);
+
+  const updateAt = (i: number, patch: Partial<CVLanguage>) =>
+    setLanguages(prev => prev.map((l, j) => (j === i ? { ...l, ...patch } : l)));
+  const removeAt = (i: number) =>
+    setLanguages(prev => prev.filter((_, j) => j !== i));
+
+  const addOne = () => {
+    setLanguages(prev => {
+      const next = [...prev, { id: '', profile_id: '', language: '', proficiency: 'professional' as const, sort_order: prev.length }];
+      setAutoOpenId(next.length - 1);
+      return next;
+    });
+  };
+  const commitBulk = () => {
+    const names = bulkInput.split(/[,\n]+/).map(s => s.trim()).filter(Boolean);
+    if (!names.length) return;
+    setLanguages(prev => [
+      ...prev,
+      ...names.map((language, idx) => ({
+        id: '', profile_id: '', language,
+        proficiency: 'professional' as const,
+        sort_order: prev.length + idx,
+      })),
+    ]);
+    setBulkInput('');
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={bulkInput}
+          onChange={e => setBulkInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && bulkInput.trim()) { e.preventDefault(); commitBulk(); } }}
+          placeholder="Paste a list: English, Spanish, French…"
+          className="flex-1 min-w-0 neo-input px-3 py-2 text-sm"
+        />
+        <button
+          type="button"
+          onClick={() => { if (bulkInput.trim()) commitBulk(); else addOne(); }}
+          className="shrink-0 neo-btn neo-btn-ghost px-3 py-2 text-xs inline-flex items-center gap-1.5"
+        >
+          <Plus className="w-4 h-4" /> {bulkInput.trim() ? 'Add all' : 'Add'}
+        </button>
+      </div>
+
+      {languages.length === 0 ? (
+        <div className="rounded-md border-2 border-dashed border-neo-border/70 p-4 text-center text-xs text-muted">
+          No languages yet — paste a list above, or click <strong className="text-white">Add</strong>.
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {languages.map((lang, index) => (
+            <LanguageChip
+              key={index}
+              lang={lang}
+              autoOpen={autoOpenId === index}
+              onChange={patch => updateAt(index, patch)}
+              onDelete={() => {
+                removeAt(index);
+                if (autoOpenId === index) setAutoOpenId(null);
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Certification chip editor ────────────────────────────────────────────
+// Common issuers get their own accent so a list of mixed certs reads like a
+// legend ("AWS orange, Google blue, Microsoft cyan…"). Case-insensitive
+// substring match — falls back to a neutral teal for anything unrecognised.
+const ISSUER_STYLES: { match: RegExp; dot: string; border: string; bg: string; text: string }[] = [
+  { match: /\b(aws|amazon)\b/i,        dot: 'bg-orange-400', border: 'border-orange-400/40', bg: 'bg-orange-400/10', text: 'text-orange-300' },
+  { match: /\bgoogle\b/i,              dot: 'bg-blue-400',   border: 'border-blue-400/40',   bg: 'bg-blue-400/10',   text: 'text-blue-300' },
+  { match: /\b(microsoft|azure)\b/i,   dot: 'bg-cyan-400',   border: 'border-cyan-400/40',   bg: 'bg-cyan-400/10',   text: 'text-cyan-300' },
+  { match: /\b(meta|facebook)\b/i,     dot: 'bg-indigo-400', border: 'border-indigo-400/40', bg: 'bg-indigo-400/10', text: 'text-indigo-300' },
+  { match: /\boracle\b/i,              dot: 'bg-red-400',    border: 'border-red-400/40',    bg: 'bg-red-400/10',    text: 'text-red-300' },
+  { match: /\b(cisco|hashicorp)\b/i,   dot: 'bg-purple-400', border: 'border-purple-400/40', bg: 'bg-purple-400/10', text: 'text-purple-300' },
+  { match: /\b(kubernetes|cncf)\b/i,   dot: 'bg-sky-400',    border: 'border-sky-400/40',    bg: 'bg-sky-400/10',    text: 'text-sky-300' },
+];
+const CERT_DEFAULT_STYLE = { dot: 'bg-teal-400', border: 'border-teal-400/40', bg: 'bg-teal-400/10', text: 'text-teal-300' };
+const styleForCert = (cert: CVCertification) => {
+  const haystack = `${cert.issuer || ''} ${cert.name || ''}`.toLowerCase();
+  return ISSUER_STYLES.find(s => s.match.test(haystack)) ?? CERT_DEFAULT_STYLE;
+};
+
+function CertificationChip({
+  cert, onChange, onDelete, autoOpen = false,
+}: {
+  cert: CVCertification;
+  onChange: (patch: Partial<CVCertification>) => void;
+  onDelete: () => void;
+  autoOpen?: boolean;
+}) {
+  const [editing, setEditing] = useState(autoOpen || !cert.name);
+  const anchorRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const pos = usePopoverAnchor(editing, anchorRef, 288);
+  const styles = styleForCert(cert);
+
+  const close = () => {
+    if (!cert.name.trim()) { onDelete(); return; }
+    setEditing(false);
+  };
+
+  useEffect(() => {
+    if (!editing) return;
+    const onDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      if (anchorRef.current?.contains(t)) return;
+      if (popoverRef.current?.contains(t)) return;
+      close();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, cert.name]);
+
+  // Pull the year out of any ISO-ish / free-text date so the chip stays tight.
+  const yearMatch = (cert.date_obtained || '').match(/\d{4}/);
+
+  const popover = editing && pos && createPortal(
+    <div
+      ref={popoverRef}
+      style={{ position: 'fixed', top: pos.top, left: pos.left, zIndex: 60 }}
+      className="w-72 rounded-md border-2 border-neo-border bg-surface shadow-xl p-2.5 space-y-2"
+    >
+      <input
+        autoFocus
+        type="text"
+        value={cert.name}
+        onChange={e => onChange({ name: e.target.value })}
+        onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); close(); } }}
+        placeholder="Certification name"
+        className="w-full neo-input px-2.5 py-1.5 text-sm"
+      />
+      <div className="grid grid-cols-2 gap-2">
+        <label className="flex flex-col gap-0.5 min-w-0">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Issuer</span>
+          <input type="text" value={cert.issuer || ''} onChange={e => onChange({ issuer: e.target.value })} placeholder="AWS, Google…" className="neo-input px-2 py-1 text-xs" />
+        </label>
+        <label className="flex flex-col gap-0.5 min-w-0">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Date obtained</span>
+          <input type="text" value={cert.date_obtained || ''} onChange={e => onChange({ date_obtained: e.target.value })} placeholder="2024-03" className="neo-input px-2 py-1 text-xs" />
+        </label>
+        <label className="flex flex-col gap-0.5 min-w-0">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Expires</span>
+          <input type="text" value={cert.expiry_date || ''} onChange={e => onChange({ expiry_date: e.target.value })} placeholder="Optional" className="neo-input px-2 py-1 text-xs" />
+        </label>
+        <label className="flex flex-col gap-0.5 min-w-0">
+          <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Credential ID</span>
+          <input type="text" value={cert.credential_id || ''} onChange={e => onChange({ credential_id: e.target.value })} placeholder="Optional" className="neo-input px-2 py-1 text-xs" />
+        </label>
+      </div>
+      <label className="flex flex-col gap-0.5">
+        <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Verify URL</span>
+        <input type="url" value={cert.url || ''} onChange={e => onChange({ url: e.target.value })} placeholder="https://…" className="neo-input px-2 py-1 text-xs" />
+      </label>
+      <div className="flex items-center justify-between pt-1">
+        <button type="button" onClick={onDelete} className="text-[11px] text-red-400 hover:text-red-300 inline-flex items-center gap-1">
+          <Trash2 className="w-3 h-3" /> Delete
+        </button>
+        <button type="button" onClick={close} className="text-[11px] text-muted hover:text-white">Done</button>
+      </div>
+    </div>,
+    document.body,
+  );
+
+  return (
+    <>
+      <button
+        ref={anchorRef}
+        type="button"
+        onClick={() => setEditing(v => !v)}
+        className={`group inline-flex items-center gap-2 pl-2.5 pr-2.5 py-1 rounded-full border-2 text-xs font-medium transition ${styles.border} ${styles.bg} ${styles.text} hover:brightness-125 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand`}
+      >
+        <span className={`w-1.5 h-1.5 rounded-full ${styles.dot}`} />
+        <span className="truncate max-w-[14rem]">{cert.name || 'New certification'}</span>
+        {cert.issuer && <span className="opacity-70 truncate max-w-[6rem]">· {cert.issuer}</span>}
+        {yearMatch && <span className="opacity-70">· {yearMatch[0]}</span>}
+      </button>
+      {popover}
+    </>
+  );
+}
+
+function CertificationsEditor({
+  certifications, setCertifications,
+}: {
+  certifications: CVCertification[];
+  setCertifications: React.Dispatch<React.SetStateAction<CVCertification[]>>;
+}) {
+  const [autoOpenId, setAutoOpenId] = useState<number | null>(null);
+
+  const updateAt = (i: number, patch: Partial<CVCertification>) =>
+    setCertifications(prev => prev.map((c, j) => (j === i ? { ...c, ...patch } : c)));
+  const removeAt = (i: number) =>
+    setCertifications(prev => prev.filter((_, j) => j !== i));
+  const addOne = () => {
+    setCertifications(prev => {
+      const next = [...prev, { id: '', profile_id: '', name: '', issuer: '', date_obtained: '', expiry_date: '', credential_id: '', url: '', sort_order: prev.length }];
+      setAutoOpenId(next.length - 1);
+      return next;
+    });
+  };
+
+  return (
+    <div className="space-y-3">
+      <div className="flex justify-end">
+        <button
+          type="button"
+          onClick={addOne}
+          className="neo-btn neo-btn-ghost px-3 py-1.5 text-xs inline-flex items-center gap-1.5"
+        >
+          <Plus className="w-4 h-4" /> Add certification
+        </button>
+      </div>
+      {certifications.length === 0 ? (
+        <div className="rounded-md border-2 border-dashed border-neo-border/70 p-4 text-center text-xs text-muted">
+          No certifications yet — click <strong className="text-white">Add certification</strong> to log one.
+        </div>
+      ) : (
+        <div className="flex flex-wrap gap-1.5">
+          {certifications.map((cert, index) => (
+            <CertificationChip
+              key={index}
+              cert={cert}
+              autoOpen={autoOpenId === index}
+              onChange={patch => updateAt(index, patch)}
+              onDelete={() => {
+                removeAt(index);
+                if (autoOpenId === index) setAutoOpenId(null);
+              }}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CVEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -850,6 +1468,16 @@ export default function CVEditor() {
   const [atsJobText, setAtsJobText] = useState('');
   const [drafting, setDrafting] = useState<'experience' | 'project' | null>(null);
   const [activeTab, setActiveTab] = useState<EditorTab>('edit');
+
+  // Accordion: only one Section is expanded at a time so the editor feels
+  // like a focused single-step flow instead of a wall of fields. `null` means
+  // every section is collapsed. The helper below is spread into each Section
+  // so we don't duplicate the `open`/`onToggle` wiring seven times.
+  const [activeSection, setActiveSection] = useState<string | null>('sec-personal');
+  const sectionProps = (sectionId: string) => ({
+    open: activeSection === sectionId,
+    onToggle: () => setActiveSection(prev => (prev === sectionId ? null : sectionId)),
+  });
 
   // ── Cover Letter feature ──────────────────────────────────────────────────
   const [coverLetterCompany, setCoverLetterCompany] = useState('');
@@ -905,6 +1533,31 @@ export default function CVEditor() {
   // Before the initial load sets the baseline we treat the editor as clean;
   // otherwise the first render would flash "Unsaved" before we've even fetched.
   const isDirty = lastSavedSigRef.current !== null && currentSig !== lastSavedSigRef.current;
+
+  // Per-destination project filters. Undefined flags (legacy rows loaded
+  // before the 00011 migration deployed) are treated as "visible" so the
+  // feature is backwards-compatible on first load.
+  const cvProjects        = useMemo(() => projects.filter(p => p.show_on_cv        !== false), [projects]);
+  const portfolioProjects = useMemo(() => projects.filter(p => p.show_on_portfolio !== false), [projects]);
+
+  // Employment-gap analysis. Both memos watch the whole experience array so
+  // editing dates or inserting a leave entry re-runs detection immediately.
+  const detectedGaps = useMemo(() => detectGaps(experience), [experience]);
+  const layoffFlagged = useMemo(() => detectShortTenurePattern(experience), [experience]);
+
+  // Rendering-only projection of `experience` that pre-appends the polite
+  // layoff note to the role line when `departure_reason === 'layoff'`. Fed
+  // to every renderer (PDF / preview / JSON / plain-text) so each one stays
+  // a straight pass-through — no template ever has to know about the flag.
+  // AI calls keep the raw `experience` array: the note is a presentation
+  // concern, not signal the model should reason over.
+  const renderedExperience = useMemo(
+    () => experience.map(e => {
+      const note = layoffNote(e);
+      return note ? { ...e, role: `${e.role}${note}` } : e;
+    }),
+    [experience],
+  );
 
   // CV completeness: weighted checklist of the fields that matter for a strong
   // CV. The % doubles as a gentle motivator and as a diagnostic the user can
@@ -1152,6 +1805,41 @@ export default function CVEditor() {
     setOptimizing(false);
   };
 
+  // Which bullet is currently being rewritten by AI (if any). Keyed on
+  // (expIndex, bulletIndex) so only the specific BulletHealth row shows a
+  // spinner; siblings stay interactive.
+  const [fixingBullet, setFixingBullet] = useState<{ expIndex: number; bulletIndex: number } | null>(null);
+
+  /**
+   * Inline "Fix with AI" for a single achievement bullet inside a specific
+   * Experience entry. Reuses `improveSection('achievements', …)` so the
+   * rewrite follows the same ATS rules (power verb + metric + outcome, ≤150
+   * chars) as the batch Optimize flow. One credit per fix.
+   */
+  const handleFixBullet = async (expIndex: number, bulletIndex: number, original: string) => {
+    if (!settings) return;
+    if (!hasCredits('ai_improve')) {
+      toast(`Fixing with AI costs ${costOf('ai_improve')} credit — top up to continue.`, 'error');
+      return;
+    }
+    const exp = experience[expIndex];
+    if (!exp) return;
+    setFixingBullet({ expIndex, bulletIndex });
+    try {
+      const context = `Role: ${exp.role || 'Unknown'} at ${exp.company || 'Unknown'}${profile.target_role ? `. Target role: ${profile.target_role}` : ''}${exp.technologies?.length ? `. Tech: ${exp.technologies.join(', ')}` : ''}. ${exp.is_current ? 'Current role (use present tense).' : 'Previous role (use past tense).'}`;
+      const rewritten = await improveSection('achievements', original, context, settings);
+      setExperience(prev => prev.map((e, i) => i !== expIndex ? e : {
+        ...e,
+        achievements: e.achievements.map((a, j) => j === bulletIndex ? rewritten : a),
+      }));
+      refreshCredits();
+    } catch (err) {
+      handleAIError(err, 'AI fix');
+    } finally {
+      setFixingBullet(null);
+    }
+  };
+
   /**
    * QualityChecks "Fix with AI" dispatcher. Each finding carries a `fix`
    * descriptor that tells us what to rewrite and where to put the result.
@@ -1298,7 +1986,9 @@ export default function CVEditor() {
 
     // Every template uses the shared jsPDF ATS-safe generator — produces
     // selectable vector text (never rasterised), parseable by ATS systems.
-    const args = [profile as CVProfile, experience, education, skills, certifications, projects, languages] as const;
+    // `cvProjects` honours the per-project "Show on CV" toggle, and
+    // `renderedExperience` has the layoff note pre-baked into role lines.
+    const args = [profile as CVProfile, renderedExperience, education, skills, certifications, cvProjects, languages] as const;
     if (template === 'modern')            generateModernPDF(...args);
     else if (template === 'professional') generateProfessionalPDF(...args);
     else if (template === 'minimal')      generateMinimalPDF(...args);
@@ -1315,16 +2005,43 @@ export default function CVEditor() {
     setExperience(prev => [...prev, { id: '', profile_id: '', company: '', role: '', location: '', start_date: '', end_date: null, is_current: false, description: '', achievements: [], technologies: [], sort_order: prev.length, created_at: '' }]);
     setOpenExp(prev => new Set(prev).add(experience.length)); // open the new card
   };
+
+  /**
+   * Insert a gap entry with a preset leave label into the Experience list.
+   * Pre-fills the dates from the detected gap so the user sees a finished
+   * entry by default and can tweak wording/dates if they want. The leave
+   * label goes into `role`, company stays empty, `gap_reason` flags the row
+   * so the editor renders the simplified gap-row UI and existing PDF / live
+   * preview templates render it as a plain single-line Experience entry.
+   */
+  const insertGapEntry = (reason: CVGapReason, from: Date, to: Date) => {
+    const preset = GAP_PRESETS.find(p => p.reason === reason) ?? GAP_PRESETS[GAP_PRESETS.length - 1];
+    const newRow: CVExperience = {
+      id: '', profile_id: '',
+      role: preset.label, company: '',
+      location: null,
+      start_date: formatMonthYear(from),
+      end_date: formatMonthYear(to),
+      is_current: false,
+      description: null,
+      achievements: [],
+      technologies: [],
+      gap_reason: reason,
+      departure_reason: null,
+      sort_order: experience.length,
+      created_at: '',
+    };
+    setExperience(prev => [...prev, newRow]);
+    setOpenExp(prev => new Set(prev).add(experience.length));
+  };
   const addEducation = () => {
     setEducation(prev => [...prev, { id: '', profile_id: '', institution: '', degree: '', field: '', location: '', start_date: '', end_date: '', grade: '', description: '', sort_order: prev.length, created_at: '' }]);
     setOpenEdu(prev => new Set(prev).add(education.length));
   };
-  const addCert = () => setCertifications(prev => [...prev, { id: '', profile_id: '', name: '', issuer: '', date_obtained: '', expiry_date: '', credential_id: '', url: '', sort_order: prev.length }]);
   const addProject = () => {
     setProjects(prev => [...prev, { id: '', profile_id: '', name: '', description: '', url: '', technologies: [], highlights: [], start_date: '', end_date: '', sort_order: prev.length }]);
     setOpenProj(prev => new Set(prev).add(projects.length));
   };
-  const addLanguage = () => setLanguages(prev => [...prev, { id: '', profile_id: '', language: '', proficiency: 'professional', sort_order: prev.length }]);
 
   /**
    * AI-draft a first Experience or Project entry from a free-text description.
@@ -1373,6 +2090,158 @@ export default function CVEditor() {
       refreshCredits();
     } catch (err) { handleAIError(err, 'AI draft'); }
     setDrafting(null);
+  };
+
+  // ── Draft Professional Summary with AI ───────────────────────────────────
+  // One-click summary generation that synthesises from the candidate's
+  // existing Experience + Skills + target role. Solves the empty-state
+  // problem (users stare at a blank textarea) without the cost of a full
+  // Optimize run. Costs 1 `ai_improve` credit.
+  const [draftingSummary, setDraftingSummary] = useState(false);
+
+  const handleDraftSummary = async () => {
+    if (!settings) return;
+    if (!hasCredits('ai_improve')) {
+      toast(`Drafting a summary costs ${costOf('ai_improve')} credit — top up to continue.`, 'error');
+      return;
+    }
+    // Intentional overwrite confirmation — losing a hand-written summary to
+    // a misclick is annoying enough to warrant a blocking prompt.
+    const hasText = (profile.summary || '').trim().length >= 30;
+    if (hasText && !window.confirm('Replace your current Professional Summary with an AI-drafted one?')) return;
+    setDraftingSummary(true);
+    try {
+      const drafted = await draftSummaryFromCV(
+        profile as CVProfile,
+        experience,
+        skills,
+        settings,
+      );
+      if (!drafted?.trim()) {
+        toast('AI returned an empty summary — try filling in a target role or one experience first.', 'error');
+        return;
+      }
+      setProfile(p => ({ ...p, summary: drafted.trim() }));
+      refreshCredits();
+    } catch (err) {
+      handleAIError(err, 'Summary draft');
+    } finally {
+      setDraftingSummary(false);
+    }
+  };
+
+  // ── Beautify Summary / Project descriptions ─────────────────────────────
+  // Keeps user-entered facts but restructures for clarity + recruiter impact.
+  // Returns plain text with `\n\n` paragraph breaks — the portfolio renderer
+  // turns those into real <p> blocks, so beautified text actually looks
+  // beautiful without introducing markdown syntax that would break ATS.
+  const [beautifyingSummary, setBeautifyingSummary] = useState(false);
+  const [beautifyingProjectIdx, setBeautifyingProjectIdx] = useState<number | null>(null);
+
+  const handleBeautifySummary = async () => {
+    if (!settings) return;
+    const current = (profile.summary || '').trim();
+    if (!current) {
+      toast('Write or draft a summary first, then beautify it.', 'info');
+      return;
+    }
+    if (!hasCredits('ai_improve')) {
+      toast(`Beautify costs ${costOf('ai_improve')} credit — top up to continue.`, 'error');
+      return;
+    }
+    setBeautifyingSummary(true);
+    try {
+      const ctx = [
+        profile.target_role ? `Target role: ${profile.target_role}` : '',
+        profile.career_stage ? `Career stage: ${profile.career_stage}` : '',
+        profile.industry ? `Industry: ${profile.industry}` : '',
+      ].filter(Boolean).join('. ');
+      const polished = await beautifyText(current, 'summary', ctx, settings);
+      if (polished) setProfile(p => ({ ...p, summary: polished }));
+      refreshCredits();
+    } catch (err) {
+      handleAIError(err, 'Summary beautify');
+    } finally {
+      setBeautifyingSummary(false);
+    }
+  };
+
+  const handleBeautifyProjectDescription = async (i: number) => {
+    if (!settings) return;
+    const proj = projects[i];
+    if (!proj) return;
+    const current = (proj.description || '').trim();
+    if (!current) {
+      toast('Add a description first, then beautify it.', 'info');
+      return;
+    }
+    if (!hasCredits('ai_improve')) {
+      toast(`Beautify costs ${costOf('ai_improve')} credit — top up to continue.`, 'error');
+      return;
+    }
+    setBeautifyingProjectIdx(i);
+    try {
+      const ctx = [
+        `Project: ${proj.name || 'Untitled'}`,
+        proj.technologies?.length ? `Tech: ${proj.technologies.join(', ')}` : '',
+        proj.url ? `URL: ${proj.url}` : '',
+      ].filter(Boolean).join('. ');
+      const polished = await beautifyText(current, 'project_description', ctx, settings);
+      if (polished) {
+        setProjects(prev => prev.map((p, j) => j === i ? { ...p, description: polished } : p));
+      }
+      refreshCredits();
+    } catch (err) {
+      handleAIError(err, 'Project beautify');
+    } finally {
+      setBeautifyingProjectIdx(null);
+    }
+  };
+
+  // ── Project import from URL ──────────────────────────────────────────────
+  // Paste a GitHub / homepage / portfolio link → AI drafts a fully-populated
+  // Project card in seconds. Reuses `draftEntryFromText` under the hood so
+  // credit accounting stays identical (1 `ai_improve` credit).
+  const [projectUrlInput, setProjectUrlInput] = useState('');
+  const [importingProjectUrl, setImportingProjectUrl] = useState(false);
+
+  const handleImportProjectFromUrl = async () => {
+    if (!settings) return;
+    const url = projectUrlInput.trim();
+    if (!url) return;
+    if (!hasCredits('ai_improve')) {
+      toast(`Importing a project costs ${costOf('ai_improve')} credit — top up to continue.`, 'error');
+      return;
+    }
+    setImportingProjectUrl(true);
+    try {
+      const { project: d, source } = await draftProjectFromUrl(url, settings);
+      if (!d) {
+        toast('AI returned nothing usable — try a GitHub URL or use the free-text drafter.', 'error');
+        return;
+      }
+      setProjects(prev => [...prev, {
+        id: '', profile_id: '',
+        name: d.name || '',
+        description: d.description || '',
+        url: d.url || url,
+        technologies: Array.isArray(d.technologies) ? d.technologies : [],
+        highlights: Array.isArray(d.highlights) ? d.highlights : [],
+        start_date: d.start_date || '',
+        end_date: d.end_date || '',
+        sort_order: prev.length,
+      }]);
+      setOpenProj(prev => new Set(prev).add(projects.length));
+      setProjectUrlInput('');
+      refreshCredits();
+      if (source === 'url-only') {
+        toast('Imported from URL — review the draft, AI had limited context.', 'success');
+      }
+    } catch (err) {
+      handleAIError(err, 'Project URL import');
+    } finally {
+      setImportingProjectUrl(false);
+    }
   };
 
   /** Toggle an index in a Set state. Used by EntryCard's onToggle prop. */
@@ -1597,9 +2466,12 @@ export default function CVEditor() {
           At md+: editor shares the viewport with the inline preview pane.
           Capped at 1600px so the split pane stays readable on ultra-wide
           monitors without letting columns get too wide. */}
+      {/* The Portfolio tab owns its own iframe preview, so we suppress the
+          CV PDF preview there and let the editor column take full width.
+          That's handled inline on the preview conditionals below. */}
       <div className="flex flex-col md:flex-row md:gap-4 px-4 md:px-6 max-w-400 mx-auto">
         {/* Editor panel */}
-        <div className={`w-full space-y-3 pb-28 md:overflow-y-auto ${showPreview ? 'md:w-1/2 md:max-h-[calc(100vh-120px)]' : 'md:max-w-3xl md:mx-auto md:max-h-[calc(100vh-120px)]'}`}>
+        <div className={`w-full space-y-3 pb-28 md:overflow-y-auto ${(showPreview && activeTab !== 'portfolio') ? 'md:w-1/2 md:max-h-[calc(100vh-120px)]' : 'md:max-w-3xl md:mx-auto md:max-h-[calc(100vh-120px)]'} ${activeTab === 'portfolio' ? 'md:max-w-none' : ''}`}>
           {/* ═══ EDIT TAB ═════════════════════════════════════════════ */}
           {activeTab === 'edit' && (<>
           <InlineJDDelta
@@ -1652,7 +2524,7 @@ export default function CVEditor() {
             ]}
           />
           {/* Personal Info */}
-          <Section id="sec-personal" title="Personal Information" defaultOpen>
+          <Section id="sec-personal" title="Personal Information" {...sectionProps('sec-personal')}>
             <div className="space-y-3">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <input type="text" value={profile.full_name || ''} onChange={e => setProfile(p => ({ ...p, full_name: e.target.value }))}
@@ -1684,6 +2556,64 @@ export default function CVEditor() {
                 <textarea value={profile.summary || ''} onChange={e => setProfile(p => ({ ...p, summary: e.target.value }))}
                   rows={4} placeholder="Write a compelling professional summary…"
                   className="neo-input w-full px-3 py-2.5 resize-none" />
+                {/* Quick AI draft — synthesises a 50–80-word summary from the
+                    candidate's existing Experience + Skills + target role.
+                    Mirrors the Project URL importer's pattern (one-click,
+                    1 credit, inline spinner). */}
+                <div className="mt-2 flex items-center justify-between gap-2 flex-wrap">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={handleDraftSummary}
+                      disabled={draftingSummary || beautifyingSummary || !hasCredits('ai_improve')}
+                      title={
+                        !hasCredits('ai_improve')
+                          ? `Not enough credits (need ${costOf('ai_improve')})`
+                          : (profile.summary || '').trim().length >= 30
+                            ? 'Regenerate from Experience + Skills — will replace current text'
+                            : 'Draft from Experience + Skills'
+                      }
+                      className="neo-btn neo-btn-ghost px-3 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {draftingSummary ? (
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Drafting…</>
+                      ) : (
+                        <>
+                          <Sparkles className="w-3.5 h-3.5 text-brand-light" />
+                          {(profile.summary || '').trim().length >= 30 ? 'Regenerate with AI' : 'Draft with AI'}
+                          <span className="inline-flex items-center gap-0.5 text-[10px] text-brand-light/80">
+                            <Coins className="w-3 h-3" />{costOf('ai_improve')}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                    {/* Beautify — keeps user's text, restructures for flow + clarity. */}
+                    <button
+                      type="button"
+                      onClick={handleBeautifySummary}
+                      disabled={beautifyingSummary || draftingSummary || !hasCredits('ai_improve') || !(profile.summary || '').trim()}
+                      title={
+                        !hasCredits('ai_improve') ? `Not enough credits (need ${costOf('ai_improve')})`
+                          : !(profile.summary || '').trim() ? 'Write or draft a summary first'
+                            : 'Polish your existing text — keeps your facts, tightens the flow'
+                      }
+                      className="neo-btn neo-btn-ghost px-3 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+                    >
+                      {beautifyingSummary ? (
+                        <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Beautifying…</>
+                      ) : (
+                        <>
+                          <Wand2 className="w-3.5 h-3.5 text-brand-light" />
+                          Beautify
+                          <span className="inline-flex items-center gap-0.5 text-[10px] text-brand-light/80">
+                            <Coins className="w-3 h-3" />{costOf('ai_improve')}
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  <span className="text-[10px] text-subtle">Draft generates from scratch · Beautify polishes what you wrote.</span>
+                </div>
                 <FieldTip>
                   <strong>50–80 words, 3–5 sentences.</strong> Front-load years + role + top 3 skills. Recruiters spend ~6 seconds on first scan — anything past 80 words goes unread. <em>Source: Ladders eye-tracking 2018.</em>
                 </FieldTip>
@@ -1751,7 +2681,7 @@ export default function CVEditor() {
           </Section>
 
           {/* Experience */}
-          <Section id="sec-experience" title="Work Experience" count={experience.length}>
+          <Section id="sec-experience" title="Work Experience" count={experience.length} {...sectionProps('sec-experience')}>
             <p className="text-xs text-muted mb-3 leading-snug">
               Highlight relevant experience (last 10 years). Use bullet points with measurable outcomes — achieved [X], measured by [Y], by doing [Z].
             </p>
@@ -1768,6 +2698,16 @@ export default function CVEditor() {
               </div>
             )}
             <div className="space-y-2">
+              {/* Gap analysis panel — shown when consecutive roles have a
+                  ≥3-month gap between them. One-click inserts a preset leave
+                  entry with dates pre-filled; user can retitle / reword. */}
+              {detectedGaps.length > 0 && (
+                <GapAnalysisPanel
+                  gaps={detectedGaps}
+                  experience={experience}
+                  onInsert={insertGapEntry}
+                />
+              )}
               {experience.length === 0 && (
                 <EmptyDraftPrompt
                   kind="experience"
@@ -1778,16 +2718,23 @@ export default function CVEditor() {
                 />
               )}
               {experience.map((exp, i) => {
+                const isGap = !!exp.gap_reason;
                 const dateLabel = (exp.start_date || exp.end_date || exp.is_current)
                   ? `${exp.start_date || '?'} – ${exp.is_current ? 'Present' : (exp.end_date || '?')}`
                   : '';
-                const cardTitle = [exp.role, exp.company].filter(Boolean).join(' at ');
+                const cardTitle = isGap
+                  ? (exp.role || 'Career Break')
+                  : [exp.role, exp.company].filter(Boolean).join(' at ');
+                const cardSubtitle = isGap
+                  ? `Leave · ${dateLabel}`
+                  : `${dateLabel}${layoffNote(exp)}`;
+                const showLayoffNudge = !isGap && layoffFlagged.has(i);
                 return (
                   <EntryCard
                     key={i}
                     index={i}
                     title={cardTitle}
-                    subtitle={dateLabel}
+                    subtitle={cardSubtitle}
                     open={openExp.has(i)}
                     onToggle={() => toggleInSet(setOpenExp, i)}
                     onDelete={() => {
@@ -1799,35 +2746,116 @@ export default function CVEditor() {
                       reorderSet(setOpenExp, from, to);
                     }}
                   >
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                      <input type="text" value={exp.role} onChange={e => { const n = [...experience]; n[i] = { ...n[i], role: e.target.value }; setExperience(n); }}
-                        placeholder="Role / Job Title *" className="neo-input px-2 py-1.5 text-sm" />
-                      <input type="text" value={exp.company} onChange={e => { const n = [...experience]; n[i] = { ...n[i], company: e.target.value }; setExperience(n); }}
-                        placeholder="Company *" className="neo-input px-2 py-1.5 text-sm" />
-                      <input type="text" value={exp.start_date} onChange={e => { const n = [...experience]; n[i] = { ...n[i], start_date: e.target.value }; setExperience(n); }}
-                        placeholder="Start (Jan 2022)" className="neo-input px-2 py-1.5 text-sm" />
-                      <input type="text" value={exp.end_date || ''} onChange={e => { const n = [...experience]; n[i] = { ...n[i], end_date: e.target.value || null }; setExperience(n); }}
-                        placeholder="End (or blank for Present)" className="neo-input px-2 py-1.5 text-sm" />
-                    </div>
-                    <textarea value={exp.achievements.join('\n')} onChange={e => { const n = [...experience]; n[i] = { ...n[i], achievements: e.target.value.split('\n').filter(l => l.trim()) }; setExperience(n); }}
-                      rows={3} placeholder="Achievements (one per line)&#10;- Led team of 5 engineers...&#10;- Increased revenue by 25%..."
-                      className="w-full neo-input px-2 py-1.5 text-sm resize-none" />
-                    {exp.achievements.filter(a => a.trim()).length > 0 && (
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[10px] text-muted font-bold uppercase tracking-wide mr-0.5">Bullet quality:</span>
-                        {exp.achievements.filter(a => a.trim()).map((a, bi) => (
-                          <BulletImpactDot key={bi} text={a} />
-                        ))}
+                    {isGap ? (
+                      /* Gap-row editor: dates + leave preset + optional note.
+                         Company / achievements / tech are deliberately hidden
+                         to communicate that this is a gap, not a job. */
+                      <div className="space-y-2">
+                        <div className="flex items-start gap-2 p-2 rounded-sm bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200">
+                          <Info className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                          <span>This entry represents an employment gap. On your CV it'll render as a single line so recruiters see the period is accounted for.</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <label className="flex flex-col gap-1 min-w-0">
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Leave type</span>
+                            <select
+                              value={exp.gap_reason || 'other'}
+                              onChange={e => {
+                                const reason = e.target.value as CVGapReason;
+                                const preset = GAP_PRESETS.find(p => p.reason === reason);
+                                const n = [...experience];
+                                n[i] = { ...n[i], gap_reason: reason, role: preset?.label || n[i].role };
+                                setExperience(n);
+                              }}
+                              className="neo-input px-2 py-1.5 text-sm"
+                            >
+                              {GAP_PRESETS.map(p => (
+                                <option key={p.reason} value={p.reason}>{p.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                          <label className="flex flex-col gap-1 min-w-0">
+                            <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Displayed label (editable)</span>
+                            <input
+                              type="text"
+                              value={exp.role}
+                              onChange={e => { const n = [...experience]; n[i] = { ...n[i], role: e.target.value }; setExperience(n); }}
+                              placeholder="Family Care Leave"
+                              className="neo-input px-2 py-1.5 text-sm"
+                            />
+                          </label>
+                          <input type="text" value={exp.start_date} onChange={e => { const n = [...experience]; n[i] = { ...n[i], start_date: e.target.value }; setExperience(n); }}
+                            placeholder="Start (Jul 2023)" className="neo-input px-2 py-1.5 text-sm" />
+                          <input type="text" value={exp.end_date || ''} onChange={e => { const n = [...experience]; n[i] = { ...n[i], end_date: e.target.value || null }; setExperience(n); }}
+                            placeholder="End (Feb 2024)" className="neo-input px-2 py-1.5 text-sm" />
+                        </div>
+                        <textarea
+                          value={(exp.achievements[0] || '')}
+                          onChange={e => {
+                            const v = e.target.value.trim();
+                            const n = [...experience];
+                            n[i] = { ...n[i], achievements: v ? [v] : [] };
+                            setExperience(n);
+                          }}
+                          rows={2}
+                          placeholder="Optional one-line note (e.g. “Cared for unwell family member; now eagerly approaching return to full-time work.”)"
+                          className="w-full neo-input px-2 py-1.5 text-sm resize-none"
+                        />
                       </div>
+                    ) : (
+                      <>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input type="text" value={exp.role} onChange={e => { const n = [...experience]; n[i] = { ...n[i], role: e.target.value }; setExperience(n); }}
+                            placeholder="Role / Job Title *" className="neo-input px-2 py-1.5 text-sm" />
+                          <input type="text" value={exp.company} onChange={e => { const n = [...experience]; n[i] = { ...n[i], company: e.target.value }; setExperience(n); }}
+                            placeholder="Company *" className="neo-input px-2 py-1.5 text-sm" />
+                          <input type="text" value={exp.start_date} onChange={e => { const n = [...experience]; n[i] = { ...n[i], start_date: e.target.value }; setExperience(n); }}
+                            placeholder="Start (Jan 2022)" className="neo-input px-2 py-1.5 text-sm" />
+                          <input type="text" value={exp.end_date || ''} onChange={e => { const n = [...experience]; n[i] = { ...n[i], end_date: e.target.value || null }; setExperience(n); }}
+                            placeholder="End (or blank for Present)" className="neo-input px-2 py-1.5 text-sm" />
+                        </div>
+                        {/* Layoff nudge: only surfaced when this role is part
+                            of a short-tenure PATTERN (≥2 consecutive sub-1yr
+                            roles). Single short role on its own never shows
+                            the nudge — podcast guidance. */}
+                        {(showLayoffNudge || exp.departure_reason === 'layoff') && (
+                          <label className="flex items-start gap-2 p-2 rounded-sm bg-surface-light/40 border border-neo-border/60 text-[11px] text-muted cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={exp.departure_reason === 'layoff'}
+                              onChange={e => {
+                                const n = [...experience];
+                                n[i] = { ...n[i], departure_reason: e.target.checked ? 'layoff' : null };
+                                setExperience(n);
+                              }}
+                              className="w-3.5 h-3.5 accent-brand cursor-pointer mt-0.5"
+                            />
+                            <span>
+                              <span className="text-white font-medium">Ended by layoff?</span>
+                              <span className="block text-[10px]">This role is under 1 year and part of a short-tenure pattern. Marking it adds <em>"(position ended in layoff, {new Date().getFullYear()})"</em> on your CV so recruiters don't read job-hopper.</span>
+                            </span>
+                          </label>
+                        )}
+                        <textarea value={exp.achievements.join('\n')} onChange={e => { const n = [...experience]; n[i] = { ...n[i], achievements: e.target.value.split('\n').filter(l => l.trim()) }; setExperience(n); }}
+                          rows={3} placeholder="Achievements (one per line)&#10;- Led team of 5 engineers...&#10;- Increased revenue by 25%..."
+                          className="w-full neo-input px-2 py-1.5 text-sm resize-none" />
+                        <BulletHealth
+                          bullets={exp.achievements}
+                          fixingIndex={fixingBullet?.expIndex === i ? fixingBullet.bulletIndex : null}
+                          fixCost={costOf('ai_improve')}
+                          fixDisabled={!hasCredits('ai_improve')}
+                          onFix={(bi, original) => handleFixBullet(i, bi, original)}
+                        />
+                        {i === 0 && (
+                          <FieldTip>
+                            <strong>Google X-Y-Z:</strong> "Accomplished <strong>[X]</strong> as measured by <strong>[Y]</strong> by doing <strong>[Z]</strong>." ≥1 number per bullet, max 2 lines (~150 chars). 3–5 bullets per role. <em>Source: Bock/Google, Rezi.</em>
+                          </FieldTip>
+                        )}
+                        <input type="text" value={exp.technologies.join(', ')} onChange={e => { const n = [...experience]; n[i] = { ...n[i], technologies: e.target.value.split(',').map(t => t.trim()).filter(Boolean) }; setExperience(n); }}
+                          placeholder="Technologies (comma-separated): React, Node.js, PostgreSQL"
+                          className="w-full neo-input px-2 py-1.5 text-sm" />
+                      </>
                     )}
-                    {i === 0 && (
-                      <FieldTip>
-                        <strong>Google X-Y-Z:</strong> "Accomplished <strong>[X]</strong> as measured by <strong>[Y]</strong> by doing <strong>[Z]</strong>." ≥1 number per bullet, max 2 lines (~150 chars). 3–5 bullets per role. <em>Source: Bock/Google, Rezi.</em>
-                      </FieldTip>
-                    )}
-                    <input type="text" value={exp.technologies.join(', ')} onChange={e => { const n = [...experience]; n[i] = { ...n[i], technologies: e.target.value.split(',').map(t => t.trim()).filter(Boolean) }; setExperience(n); }}
-                      placeholder="Technologies (comma-separated): React, Node.js, PostgreSQL"
-                      className="w-full neo-input px-2 py-1.5 text-sm" />
                   </EntryCard>
                 );
               })}
@@ -1843,7 +2871,7 @@ export default function CVEditor() {
           </Section>
 
           {/* Education */}
-          <Section id="sec-education" title="Education" count={education.length}>
+          <Section id="sec-education" title="Education" count={education.length} {...sectionProps('sec-education')}>
             <p className="text-xs text-muted mb-3 leading-snug">
               A varied education on your CV sums up the value your learnings and background bring to the role.
             </p>
@@ -1907,7 +2935,7 @@ export default function CVEditor() {
           </Section>
 
           {/* Skills */}
-          <Section id="sec-skills" title="Skills" count={skills.length}>
+          <Section id="sec-skills" title="Skills" count={skills.length} {...sectionProps('sec-skills')}>
             <FieldTip>
               <strong>8–12 skills</strong> that match the job description. Use <strong>exact JD terminology</strong> ("CI/CD" not "continuous integration", "React.js" not "React"). Don't dump 30+ generic items. <em>Source: uppl.ai, Workday guide.</em>
             </FieldTip>
@@ -1915,63 +2943,60 @@ export default function CVEditor() {
           </Section>
 
           {/* Languages */}
-          <Section id="sec-languages" title="Languages" count={languages.length} defaultOpen={false}>
-            <div className="space-y-2">
-              {languages.map((lang, i) => (
-                <div key={i} className="rounded-md border-2 border-neo-border/70 bg-surface/40 p-2.5 space-y-2">
-                  <div className="flex gap-2 items-center">
-                    <input type="text" value={lang.language} onChange={e => { const n = [...languages]; n[i] = { ...n[i], language: e.target.value }; setLanguages(n); }}
-                      placeholder="e.g., English, Spanish, Portuguese" className="flex-1 min-w-0 neo-input px-2.5 py-1.5 text-sm" />
-                    <button onClick={() => setLanguages(prev => prev.filter((_, j) => j !== i))} aria-label="Remove language"
-                      className="shrink-0 neo-btn neo-btn-ghost p-1.5 text-red-400 hover:border-red-500 hover:bg-red-500/10"><Trash2 className="w-4 h-4" /></button>
-                  </div>
-                  <label className="flex flex-col gap-0.5">
-                    <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Proficiency</span>
-                    <select value={lang.proficiency} onChange={e => { const n = [...languages]; n[i] = { ...n[i], proficiency: e.target.value as any }; setLanguages(n); }}
-                      className="neo-input px-2 py-1.5 text-xs">
-                      {LANGUAGE_LEVELS.map(l => <option key={l} value={l}>{l}</option>)}
-                    </select>
-                  </label>
-                </div>
-              ))}
-              <button onClick={addLanguage} className="neo-btn neo-btn-ghost px-3 py-1.5 text-xs inline-flex items-center gap-1.5"><Plus className="w-4 h-4" /> Add Language</button>
-            </div>
+          <Section id="sec-languages" title="Languages" count={languages.length} {...sectionProps('sec-languages')}>
+            <LanguagesEditor languages={languages} setLanguages={setLanguages} />
           </Section>
 
           {/* Certifications */}
-          <Section id="sec-certifications" title="Certifications" count={certifications.length} defaultOpen={false}>
-            <div className="space-y-2">
-              {certifications.map((cert, i) => (
-                <div key={i} className="rounded-md border-2 border-neo-border/70 bg-surface/40 p-2.5 space-y-2">
-                  <div className="flex gap-2 items-center">
-                    <input type="text" value={cert.name} onChange={e => { const n = [...certifications]; n[i] = { ...n[i], name: e.target.value }; setCertifications(n); }}
-                      placeholder="e.g., AWS Certified Solutions Architect" className="flex-1 min-w-0 neo-input px-2.5 py-1.5 text-sm" />
-                    <button onClick={() => setCertifications(prev => prev.filter((_, j) => j !== i))} aria-label="Remove certification"
-                      className="shrink-0 neo-btn neo-btn-ghost p-1.5 text-red-400 hover:border-red-500 hover:bg-red-500/10"><Trash2 className="w-4 h-4" /></button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="flex flex-col gap-0.5 min-w-0">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Issuer</span>
-                      <input type="text" value={cert.issuer || ''} onChange={e => { const n = [...certifications]; n[i] = { ...n[i], issuer: e.target.value }; setCertifications(n); }}
-                        placeholder="AWS, Google, Microsoft…" className="neo-input px-2 py-1.5 text-xs" />
-                    </label>
-                    <label className="flex flex-col gap-0.5 min-w-0">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Date</span>
-                      <input type="text" value={cert.date_obtained || ''} onChange={e => { const n = [...certifications]; n[i] = { ...n[i], date_obtained: e.target.value }; setCertifications(n); }}
-                        placeholder="2024-03" className="neo-input px-2 py-1.5 text-xs" />
-                    </label>
-                  </div>
-                </div>
-              ))}
-              <button onClick={addCert} className="neo-btn neo-btn-ghost px-3 py-1.5 text-xs inline-flex items-center gap-1.5"><Plus className="w-4 h-4" /> Add Certification</button>
-            </div>
+          <Section id="sec-certifications" title="Certifications" count={certifications.length} {...sectionProps('sec-certifications')}>
+            <CertificationsEditor certifications={certifications} setCertifications={setCertifications} />
           </Section>
 
           {/* Projects */}
-          <Section id="sec-projects" title="Projects" count={projects.length} defaultOpen={false}>
+          <Section id="sec-projects" title="Projects" count={projects.length} {...sectionProps('sec-projects')}>
             <p className="text-xs text-muted mb-3 leading-snug">
               Showcase 2+ projects that prove your skills. Include GitHub/live links and measurable adoption (users, stars, revenue).
             </p>
+
+            {/* Import from URL — AI reads a GitHub repo (or any URL) and fills
+                name / description / technologies / highlights automatically. */}
+            <div className="mb-3 rounded-md border-2 border-neo-border/60 bg-surface/40 p-2.5 space-y-1.5">
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <Sparkles className="w-3.5 h-3.5 text-brand-light" />
+                <span className="text-[10px] font-extrabold uppercase tracking-wide text-white">Import from URL</span>
+                <span className="text-[10px] text-subtle">· GitHub works best</span>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="url"
+                  value={projectUrlInput}
+                  onChange={e => setProjectUrlInput(e.target.value)}
+                  onKeyDown={e => { if (e.key === 'Enter' && projectUrlInput.trim() && !importingProjectUrl) { e.preventDefault(); handleImportProjectFromUrl(); } }}
+                  placeholder="https://github.com/owner/repo   or   https://your-project.com"
+                  className="flex-1 min-w-0 neo-input px-2.5 py-1.5 text-sm"
+                  disabled={importingProjectUrl}
+                />
+                <button
+                  type="button"
+                  onClick={handleImportProjectFromUrl}
+                  disabled={!projectUrlInput.trim() || importingProjectUrl || !hasCredits('ai_improve')}
+                  title={!hasCredits('ai_improve') ? `Not enough credits (need ${costOf('ai_improve')})` : 'Import with AI'}
+                  className="shrink-0 neo-btn neo-btn-ghost px-3 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50"
+                >
+                  {importingProjectUrl ? (
+                    <><Loader2 className="w-3.5 h-3.5 animate-spin" /> Importing…</>
+                  ) : (
+                    <>
+                      <Sparkles className="w-3.5 h-3.5" /> Import
+                      <span className="inline-flex items-center gap-0.5 text-[10px] text-brand-light/80">
+                        <Coins className="w-3 h-3" />{costOf('ai_improve')}
+                      </span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+
             {projects.length > 1 && (
               <div className="flex justify-center mb-3">
                 <button
@@ -1995,7 +3020,20 @@ export default function CVEditor() {
                 />
               )}
               {projects.map((proj, i) => {
-                const subtitle = [proj.url, proj.technologies.slice(0, 3).join(', ')].filter(Boolean).join(' · ');
+                const showCv = proj.show_on_cv !== false;
+                const showPortfolio = proj.show_on_portfolio !== false;
+                // Small visibility hint in the collapsed card subtitle so
+                // users can scan which projects are hidden without expanding.
+                const visibilityHint =
+                  !showCv && !showPortfolio ? 'Hidden'
+                    : !showCv ? 'Portfolio only'
+                      : !showPortfolio ? 'CV only'
+                        : '';
+                const subtitle = [
+                  proj.url,
+                  proj.technologies.slice(0, 3).join(', '),
+                  visibilityHint,
+                ].filter(Boolean).join(' · ');
                 return (
                   <EntryCard
                     key={i}
@@ -2013,6 +3051,30 @@ export default function CVEditor() {
                       reorderSet(setOpenProj, from, to);
                     }}
                   >
+                    {/* Per-destination visibility — lets users keep every
+                        project on their profile but pick which appear on the
+                        exported CV PDF vs the exported Portfolio HTML. */}
+                    <div className="flex flex-wrap items-center gap-3 pb-2 border-b border-neo-border/40 text-xs">
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Show on</span>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={showCv}
+                          onChange={e => { const n = [...projects]; n[i] = { ...n[i], show_on_cv: e.target.checked }; setProjects(n); }}
+                          className="w-3.5 h-3.5 accent-brand cursor-pointer"
+                        />
+                        <FileText className="w-3 h-3 text-muted" /> CV
+                      </label>
+                      <label className="flex items-center gap-1.5 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={showPortfolio}
+                          onChange={e => { const n = [...projects]; n[i] = { ...n[i], show_on_portfolio: e.target.checked }; setProjects(n); }}
+                          className="w-3.5 h-3.5 accent-brand cursor-pointer"
+                        />
+                        <Globe className="w-3 h-3 text-muted" /> Portfolio
+                      </label>
+                    </div>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       <input type="text" value={proj.name} onChange={e => { const n = [...projects]; n[i] = { ...n[i], name: e.target.value }; setProjects(n); }}
                         placeholder="Project name *" className="neo-input px-2 py-1.5 text-sm" />
@@ -2022,6 +3084,33 @@ export default function CVEditor() {
                     <textarea value={proj.description || ''} onChange={e => { const n = [...projects]; n[i] = { ...n[i], description: e.target.value }; setProjects(n); }}
                       rows={2} placeholder="Description"
                       className="w-full neo-input px-2 py-1.5 text-sm resize-none" />
+                    {/* Beautify — AI restructures this description for clarity + impact.
+                        Plain-text output with natural paragraph breaks; the portfolio
+                        renderer turns `\n\n` into real <p> blocks. */}
+                    <div className="flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => handleBeautifyProjectDescription(i)}
+                        disabled={beautifyingProjectIdx !== null || !hasCredits('ai_improve') || !(proj.description || '').trim()}
+                        title={
+                          !hasCredits('ai_improve') ? `Not enough credits (need ${costOf('ai_improve')})`
+                            : !(proj.description || '').trim() ? 'Add a description first'
+                              : 'Polish this description — keeps your facts, improves flow'
+                        }
+                        className="neo-btn neo-btn-ghost px-2.5 py-1 text-[11px] inline-flex items-center gap-1.5 disabled:opacity-50"
+                      >
+                        {beautifyingProjectIdx === i ? (
+                          <><Loader2 className="w-3 h-3 animate-spin" /> Beautifying…</>
+                        ) : (
+                          <>
+                            <Wand2 className="w-3 h-3 text-brand-light" /> Beautify
+                            <span className="inline-flex items-center gap-0.5 text-[10px] text-brand-light/80">
+                              <Coins className="w-3 h-3" />{costOf('ai_improve')}
+                            </span>
+                          </>
+                        )}
+                      </button>
+                    </div>
                     <input type="text" value={proj.technologies.join(', ')} onChange={e => { const n = [...projects]; n[i] = { ...n[i], technologies: e.target.value.split(',').map(t => t.trim()).filter(Boolean) }; setProjects(n); }}
                       placeholder="Technologies (comma-separated)"
                       className="w-full neo-input px-2 py-1.5 text-sm" />
@@ -2115,7 +3204,7 @@ export default function CVEditor() {
                   type="button"
                   onClick={() => {
                     const resume = toJSONResume(
-                      profile as CVProfile, experience, education, skills, certifications, projects, languages,
+                      profile as CVProfile, renderedExperience, education, skills, certifications, cvProjects, languages,
                     );
                     const safeName = (profile.full_name || 'resume').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
                     downloadJSONResume(resume, `${safeName || 'resume'}.json`);
@@ -2142,7 +3231,7 @@ export default function CVEditor() {
                   type="button"
                   onClick={() => {
                     const text = toPlainText(
-                      profile as CVProfile, experience, education, skills, certifications, projects, languages,
+                      profile as CVProfile, renderedExperience, education, skills, certifications, cvProjects, languages,
                     );
                     const safeName = (profile.full_name || 'resume').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
                     downloadPlainText(text, `${safeName || 'resume'}.txt`);
@@ -2326,6 +3415,16 @@ export default function CVEditor() {
             </div>
             </div>
           )}
+          {/* ═══ PORTFOLIO TAB ════════════════════════════════════════ */}
+          {activeTab === 'portfolio' && (
+            <PortfolioBuilder
+              cvId={id}
+              profile={profile}
+              experience={renderedExperience}
+              projects={portfolioProjects}
+              skills={skills}
+            />
+          )}
         </div>
 
         {/* ── Floating "Ask AI writer" pill — always available, opens AI Review ── */}
@@ -2353,41 +3452,41 @@ export default function CVEditor() {
         </button>
 
         {/* Inline Live Preview — desktop only (mobile uses the overlay below). */}
-        {showPreview && (
+        {showPreview && activeTab !== 'portfolio' && (
           <div className="hidden md:block md:w-1/2 md:sticky md:top-4" style={{ maxHeight: 'calc(100vh - 120px)', overflowY: 'auto' }}>
             <div className="bg-white rounded-lg shadow-xl overflow-hidden" style={{ transform: 'scale(0.72)', transformOrigin: 'top center' }}>
               {template === 'modern' ? (
                 <CVTemplateModern
-                  profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                  profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : template === 'minimal' ? (
                 <CVTemplateMinimal
-                  profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                  profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : template === 'professional' ? (
                 <CVTemplateProfessional
-                  profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                  profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : template === 'executive' ? (
                 <CVTemplateExecutive
-                  profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                  profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : template === 'corporate' ? (
                 <CVTemplateCorporate
-                  profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                  profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : template === 'neo' ? (
                 <CVTemplateNeo
-                  profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                  profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : template === 'neo-dark' ? (
                 <CVTemplateNeoDark
-                  profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                  profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : (
                 <CVTemplateClassic
-                  profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                  profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               )}
             </div>
           </div>
@@ -2398,7 +3497,7 @@ export default function CVEditor() {
           inline preview takes over. Scrolls the whole viewport and offers a
           clear dismiss control; zoom is constrained so the CV is readable
           without a magnifier. */}
-      {showPreview && (
+      {showPreview && activeTab !== 'portfolio' && (
         <div className="md:hidden fixed inset-0 z-50 bg-surface overflow-y-auto">
           <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 bg-surface border-b-[3px] border-neo-border">
             <span className="text-sm font-extrabold uppercase tracking-wide">Preview</span>
@@ -2413,29 +3512,29 @@ export default function CVEditor() {
           <div className="p-4">
             <div className="bg-white rounded-lg shadow-xl overflow-hidden" style={{ transform: 'scale(0.48)', transformOrigin: 'top left', width: '208%' }}>
               {template === 'modern' ? (
-                <CVTemplateModern profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                <CVTemplateModern profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : template === 'minimal' ? (
-                <CVTemplateMinimal profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                <CVTemplateMinimal profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : template === 'professional' ? (
-                <CVTemplateProfessional profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                <CVTemplateProfessional profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : template === 'executive' ? (
-                <CVTemplateExecutive profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                <CVTemplateExecutive profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : template === 'corporate' ? (
-                <CVTemplateCorporate profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                <CVTemplateCorporate profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : template === 'neo' ? (
-                <CVTemplateNeo profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                <CVTemplateNeo profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : template === 'neo-dark' ? (
-                <CVTemplateNeoDark profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                <CVTemplateNeoDark profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               ) : (
-                <CVTemplateClassic profile={profile as CVProfile} experience={experience} education={education}
-                  skills={skills} certifications={certifications} projects={projects} languages={languages} />
+                <CVTemplateClassic profile={profile as CVProfile} experience={renderedExperience} education={education}
+                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
               )}
             </div>
           </div>

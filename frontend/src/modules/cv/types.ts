@@ -35,6 +35,16 @@ export interface CVProfile {
   updated_at: string;
 }
 
+/** Employment-gap reason codes. Empty / null = not a gap, this is a real role.
+ *  Guidance lifted from the gap-handling podcast: use a specific, labeled
+ *  leave instead of a blank or "Unemployed" — reframes the period. */
+export type CVGapReason = 'family_care' | 'education' | 'relocation' | 'sabbatical' | 'medical' | 'other';
+
+/** How the role ended. Only `layoff` is currently rendered (adds a polite
+ *  note to the role line) and it's only surfaced visually when the candidate
+ *  has a pattern of short tenures — one short role alone doesn't need it. */
+export type CVDepartureReason = 'layoff' | 'resignation' | 'contract_end';
+
 export interface CVExperience {
   id: string;
   profile_id: string;
@@ -49,6 +59,13 @@ export interface CVExperience {
   technologies: string[];
   sort_order: number;
   created_at: string;
+  /** When set, this row represents an employment gap — editor hides
+   *  company / tech / achievement-count fields and the `role` holds the
+   *  leave label (e.g. "Family Care Leave"). Legacy rows without the
+   *  column are treated as normal roles. */
+  gap_reason?: CVGapReason | null;
+  /** Reason this role ended. Only `layoff` is surfaced in rendering. */
+  departure_reason?: CVDepartureReason | null;
 }
 
 export interface CVEducation {
@@ -99,6 +116,11 @@ export interface CVProject {
   start_date: string | null;
   end_date: string | null;
   sort_order: number;
+  /** When false, hide from the CV PDF + live preview + JSON/plainText export.
+   *  Undefined (legacy rows loaded pre-migration) is treated as true. */
+  show_on_cv?: boolean;
+  /** Same idea but for the GitHub Portfolio HTML export. */
+  show_on_portfolio?: boolean;
 }
 
 export interface CVLanguage {
@@ -152,6 +174,19 @@ export const JOB_STATUSES: { value: JobStatus; label: string; color: string }[] 
   { value: 'rejected',    label: 'Rejected',    color: 'border-red-500     bg-red-500/10      text-red-400' },
   { value: 'withdrawn',   label: 'Withdrawn',   color: 'border-accent      bg-accent/10       text-accent' },
   { value: 'ghosted',     label: 'Ghosted',     color: 'border-subtle      bg-surface-light   text-subtle' },
+];
+
+/** Preset leave labels — these are the `role` string written into the
+ *  Experience row when a gap is inserted. Matches the vocabulary from the
+ *  "Next Job Now" gap episode: reframes a blank period as a specific,
+ *  non-negotiable leave that doesn't invite follow-up probing. */
+export const GAP_PRESETS: { reason: CVGapReason; label: string; hint: string }[] = [
+  { reason: 'family_care', label: 'Family Care Leave',       hint: 'Caring for children, sick relatives, or personal health — no further questions invited.' },
+  { reason: 'education',   label: 'Education Leave',          hint: 'Full-time study, bootcamp, or credential work.' },
+  { reason: 'relocation',  label: 'Family Relocation Leave',  hint: 'Moving countries / cities disrupted the job search window.' },
+  { reason: 'sabbatical',  label: 'Sabbatical',               hint: 'Intentional break for travel, writing, or personal projects.' },
+  { reason: 'medical',     label: 'Medical Leave',            hint: 'Health-related absence now fully recovered.' },
+  { reason: 'other',       label: 'Career Break',             hint: 'Generic honest label when none of the above fits.' },
 ];
 
 export const SKILL_CATEGORIES = ['Technical', 'Soft Skills', 'Tools', 'Frameworks', 'Languages', 'Databases', 'Cloud', 'Other'] as const;

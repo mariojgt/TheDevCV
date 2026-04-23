@@ -55,6 +55,21 @@ export interface PDFStyle {
   pageBg?: RGB;
   /** Override default body text colour (for dark templates). */
   bodyText?: RGB;
+  /** Override colour of bold labels (name, role/company, "Tech:" prefix,
+   *  cert/project/skill-category labels). Defaults to BLACK. Dark templates
+   *  set this to near-white so these labels are legible on a dark page. */
+  headingText?: RGB;
+  /** Override colour of secondary meta text (dates, grade, location, link
+   *  separators). Defaults to MUTED. Dark templates raise the luminance so
+   *  it stays readable without competing with body text. */
+  mutedText?: RGB;
+  /** Override colour of horizontal rule / divider lines. Defaults to RULE. */
+  ruleColor?: RGB;
+  /** Override colour of the big section title text (SUMMARY, EXPERIENCE…)
+   *  when the heading style paints it (underline-accent / underline-gray /
+   *  tracked-caps / labeled-rule). Defaults to BLACK. Dark templates set
+   *  this to the accent colour so titles pop against the dark page. */
+  sectionTitleText?: RGB;
 }
 
 const STYLES: Record<PDFStyle['id'], PDFStyle> = {
@@ -65,7 +80,15 @@ const STYLES: Record<PDFStyle['id'], PDFStyle> = {
   executive:    { id: 'executive',    baseFont: 'times',     accent: [30, 78, 140],  headingStyle: 'serif-accent',     nameBar: true,  nameAccent: true },
   corporate:    { id: 'corporate',    baseFont: 'helvetica', accent: [37, 99, 235],  headingStyle: 'double-rule',      nameAccent: true, nameUppercase: true },
   neo:          { id: 'neo',          baseFont: 'helvetica', accent: [13, 150, 104], headingStyle: 'underline-accent', nameUppercase: true },
-  'neo-dark':   { id: 'neo-dark',     baseFont: 'helvetica', accent: [43, 184, 133], headingStyle: 'underline-accent', nameUppercase: true, pageBg: [12, 18, 34], bodyText: [200, 214, 232] },
+  // Neo Dark palette mirrors the `CVTemplateNeoDark` preview exactly:
+  //   pageBg           #0c1222  → [12, 18, 34]
+  //   bodyText         #c8d6e8  → [200, 214, 232]
+  //   accent (BRAND_LT)#2bb885  → [43, 184, 133]
+  //   headingText      #ffffff  → [255, 255, 255]   (name, role, labels)
+  //   mutedText        #8594b0  → [133, 148, 176]   (dates, meta)
+  //   ruleColor        #3a506e  → [58, 80, 110]     (border navy)
+  //   sectionTitleText = accent → [43, 184, 133]    (green section headings)
+  'neo-dark':   { id: 'neo-dark',     baseFont: 'helvetica', accent: [43, 184, 133], headingStyle: 'underline-accent', nameUppercase: true, pageBg: [12, 18, 34], bodyText: [200, 214, 232], headingText: [255, 255, 255], mutedText: [133, 148, 176], ruleColor: [58, 80, 110], sectionTitleText: [43, 184, 133] },
 };
 
 interface CVData {
@@ -88,7 +111,11 @@ interface Ctx {
   mb: number;
   cw: number;    // content width
   y: number;     // current vertical cursor
-  bodyRgb: RGB;  // body text — overridden for dark templates
+  bodyRgb: RGB;         // body text — overridden for dark templates
+  headingRgb: RGB;      // bold labels (name, role/company, project name, etc.)
+  mutedRgb: RGB;        // dates / meta / locations / grades
+  ruleRgb: RGB;         // horizontal rules & dividers
+  sectionTitleRgb: RGB; // big section titles (SUMMARY, EXPERIENCE…)
 }
 
 function newPage(ctx: Ctx) {
@@ -133,7 +160,7 @@ function renderHeader(ctx: Ctx, data: CVData) {
 
   const nameSize = ctx.style.id === 'minimal' ? 20 : ctx.style.nameUppercase ? 20 : 18;
   setFont(ctx, 'bold', nameSize);
-  setColor(ctx, ctx.style.nameAccent ? ctx.style.accent : BLACK);
+  setColor(ctx, ctx.style.nameAccent ? ctx.style.accent : ctx.headingRgb);
   const rawName = (profile.full_name || '').trim();
   const name = ctx.style.nameUppercase ? rawName.toUpperCase() : rawName;
   if (name) {
@@ -143,11 +170,14 @@ function renderHeader(ctx: Ctx, data: CVData) {
 
   if (profile.job_title) {
     setFont(ctx, 'bold', 11);
-    const titleColor = ctx.style.id === 'modern' || ctx.style.id === 'executive'
+    // Neo Dark's preview uses BRAND_LT (green) for the job title — route it
+    // through the accent branch to match. Corporate keeps the heading colour
+    // (black on light page, near-white on any future dark variant).
+    const titleColor = ctx.style.id === 'modern' || ctx.style.id === 'executive' || ctx.style.id === 'neo-dark'
       ? ctx.style.accent
       : ctx.style.id === 'corporate'
-        ? BLACK
-        : MUTED;
+        ? ctx.headingRgb
+        : ctx.mutedRgb;
     setColor(ctx, titleColor);
     const jobTitle = ctx.style.nameUppercase ? profile.job_title.toUpperCase() : profile.job_title;
     ctx.doc.text(jobTitle, textX, ctx.y);
@@ -173,7 +203,7 @@ function renderHeader(ctx: Ctx, data: CVData) {
     let x = textX;
     for (let i = 0; i < links.length; i++) {
       if (i > 0) {
-        setColor(ctx, MUTED);
+        setColor(ctx, ctx.mutedRgb);
         ctx.doc.text('  |  ', x, ctx.y);
         x += ctx.doc.getTextWidth('  |  ');
         setColor(ctx, ctx.style.accent);
@@ -206,7 +236,7 @@ function renderHeader(ctx: Ctx, data: CVData) {
     ctx.doc.setDrawColor(ctx.style.accent[0], ctx.style.accent[1], ctx.style.accent[2]);
     ctx.doc.setLineWidth(0.6);
   } else {
-    ctx.doc.setDrawColor(RULE[0], RULE[1], RULE[2]);
+    ctx.doc.setDrawColor(ctx.ruleRgb[0], ctx.ruleRgb[1], ctx.ruleRgb[2]);
     ctx.doc.setLineWidth(0.3);
   }
   ctx.doc.line(ctx.ml, ctx.y, PW - ctx.mr, ctx.y);
@@ -223,10 +253,10 @@ function renderHeading(ctx: Ctx, text: string) {
     case 'underline-accent':
     case 'underline-gray': {
       setFont(ctx, 'bold', 10);
-      setColor(ctx, BLACK);
+      setColor(ctx, ctx.sectionTitleRgb);
       ctx.doc.text(upper, ctx.ml, ctx.y);
       ctx.y += 1.4;
-      const [r, g, b] = ctx.style.headingStyle === 'underline-accent' ? ctx.style.accent : RULE;
+      const [r, g, b] = ctx.style.headingStyle === 'underline-accent' ? ctx.style.accent : ctx.ruleRgb;
       ctx.doc.setDrawColor(r, g, b);
       ctx.doc.setLineWidth(ctx.style.headingStyle === 'underline-accent' ? 0.5 : 0.25);
       ctx.doc.line(ctx.ml, ctx.y, PW - ctx.mr, ctx.y);
@@ -236,7 +266,7 @@ function renderHeading(ctx: Ctx, text: string) {
     case 'tracked-caps': {
       // Minimal: small tracked label, no rule.
       setFont(ctx, 'normal', 8);
-      setColor(ctx, MUTED);
+      setColor(ctx, ctx.mutedRgb);
       ctx.doc.text(upper.split('').join(' '), ctx.ml, ctx.y); // fake letter-spacing
       ctx.y += 4.5;
       break;
@@ -244,10 +274,10 @@ function renderHeading(ctx: Ctx, text: string) {
     case 'labeled-rule': {
       // Professional: tiny label, rule extends to right margin.
       setFont(ctx, 'bold', 8);
-      setColor(ctx, MUTED);
+      setColor(ctx, ctx.mutedRgb);
       ctx.doc.text(upper, ctx.ml, ctx.y);
       const labelW = ctx.doc.getTextWidth(upper);
-      ctx.doc.setDrawColor(RULE[0], RULE[1], RULE[2]);
+      ctx.doc.setDrawColor(ctx.ruleRgb[0], ctx.ruleRgb[1], ctx.ruleRgb[2]);
       ctx.doc.setLineWidth(0.2);
       ctx.doc.line(ctx.ml + labelW + 3, ctx.y - 1, PW - ctx.mr, ctx.y - 1);
       ctx.y += 4;
@@ -305,11 +335,13 @@ function renderExperience(ctx: Ctx, data: CVData) {
 
     // Role + company (bold) on one line, dates on the same line right-aligned.
     // ATS parses "Role, Company" as the job title and picks the date range.
+    // Layoff notes are pre-applied to `exp.role` by the caller (see
+    // `renderedExperience` memo in CVEditor) so every renderer stays lean.
     const roleLine = `${exp.role}${exp.company ? ', ' + exp.company : ''}`;
     const dateLine = `${exp.start_date || ''}${exp.start_date || exp.end_date || exp.is_current ? ' — ' : ''}${exp.is_current ? 'Present' : (exp.end_date || '')}`;
 
     setFont(ctx, 'bold', 10);
-    setColor(ctx, BLACK);
+    setColor(ctx, ctx.headingRgb);
     // Truncate role line so the date line fits on the right.
     const dateW = dateLine ? ctx.doc.getTextWidth(dateLine) + 4 : 0;
     const roleLines = ctx.doc.splitTextToSize(roleLine, ctx.cw - dateW);
@@ -317,7 +349,7 @@ function renderExperience(ctx: Ctx, data: CVData) {
 
     if (dateLine.trim() && dateLine !== ' — ') {
       setFont(ctx, 'normal', 8.5);
-      setColor(ctx, MUTED);
+      setColor(ctx, ctx.mutedRgb);
       ctx.doc.text(dateLine, PW - ctx.mr, ctx.y, { align: 'right' });
     }
     ctx.y += 4.5;
@@ -325,7 +357,7 @@ function renderExperience(ctx: Ctx, data: CVData) {
     // Location (inline, never floated).
     if (exp.location) {
       setFont(ctx, 'italic', 8.5);
-      setColor(ctx, MUTED);
+      setColor(ctx, ctx.mutedRgb);
       ctx.doc.text(exp.location, ctx.ml, ctx.y);
       ctx.y += 4;
     }
@@ -345,7 +377,7 @@ function renderExperience(ctx: Ctx, data: CVData) {
     if (exp.technologies.length) {
       ensureSpace(ctx, 4);
       setFont(ctx, 'bold', 8.5);
-      setColor(ctx, BLACK);
+      setColor(ctx, ctx.headingRgb);
       const label = 'Tech: ';
       ctx.doc.text(label, ctx.ml, ctx.y);
       const labelW = ctx.doc.getTextWidth(label);
@@ -375,26 +407,26 @@ function renderEducation(ctx: Ctx, data: CVData) {
     const dateW = dateStr ? 28 : 0;
 
     setFont(ctx, 'bold', 9.5);
-    setColor(ctx, BLACK);
+    setColor(ctx, ctx.headingRgb);
     const lines = ctx.doc.splitTextToSize(title, ctx.cw - dateW);
     ctx.doc.text(lines[0] || '', ctx.ml, ctx.y);
 
     if (dateStr) {
       setFont(ctx, 'normal', 8.5);
-      setColor(ctx, MUTED);
+      setColor(ctx, ctx.mutedRgb);
       ctx.doc.text(dateStr, PW - ctx.mr, ctx.y, { align: 'right' });
     }
     ctx.y += 4;
 
     if (edu.grade) {
       setFont(ctx, 'italic', 8.5);
-      setColor(ctx, MUTED);
+      setColor(ctx, ctx.mutedRgb);
       ctx.doc.text(`Grade: ${edu.grade}`, ctx.ml, ctx.y);
       ctx.y += 3.6;
     }
     if (edu.location) {
       setFont(ctx, 'italic', 8.5);
-      setColor(ctx, MUTED);
+      setColor(ctx, ctx.mutedRgb);
       ctx.doc.text(edu.location, ctx.ml, ctx.y);
       ctx.y += 3.6;
     }
@@ -417,7 +449,7 @@ function renderSkills(ctx: Ctx, data: CVData) {
     ensureSpace(ctx, 4);
     const label = `${cat}: `;
     setFont(ctx, 'bold', 9);
-    setColor(ctx, BLACK);
+    setColor(ctx, ctx.headingRgb);
     ctx.doc.text(label, ctx.ml, ctx.y);
     const labelW = ctx.doc.getTextWidth(label);
 
@@ -442,7 +474,7 @@ function renderProjects(ctx: Ctx, data: CVData) {
   for (const p of data.projects) {
     ensureSpace(ctx, 6);
     setFont(ctx, 'bold', 9.5);
-    setColor(ctx, BLACK);
+    setColor(ctx, ctx.headingRgb);
     ctx.doc.text(p.name, ctx.ml, ctx.y);
     const nameW = ctx.doc.getTextWidth(p.name);
 
@@ -473,7 +505,7 @@ function renderProjects(ctx: Ctx, data: CVData) {
     }
     if (p.technologies.length) {
       setFont(ctx, 'bold', 8.5);
-      setColor(ctx, BLACK);
+      setColor(ctx, ctx.headingRgb);
       ctx.doc.text('Tech: ', ctx.ml, ctx.y);
       const lw = ctx.doc.getTextWidth('Tech: ');
       setFont(ctx, 'normal', 8.5);
@@ -495,7 +527,7 @@ function renderCertifications(ctx: Ctx, data: CVData) {
   for (const c of data.certifications) {
     ensureSpace(ctx, 4);
     setFont(ctx, 'bold', 9);
-    setColor(ctx, BLACK);
+    setColor(ctx, ctx.headingRgb);
     const line = `${c.name}${c.issuer ? ', ' + c.issuer : ''}${c.date_obtained ? ' — ' + c.date_obtained : ''}`;
     const lines = ctx.doc.splitTextToSize(line, ctx.cw);
     writeLines(ctx, lines, ctx.ml, 3.8);
@@ -548,7 +580,11 @@ function renderATSPdf(data: CVData, style: PDFStyle) {
     mb: DEFAULT_MB,
     cw: PW - DEFAULT_ML - DEFAULT_MR,
     y:  DEFAULT_MT,
-    bodyRgb: style.bodyText ?? BODY,
+    bodyRgb:         style.bodyText         ?? BODY,
+    headingRgb:      style.headingText      ?? BLACK,
+    mutedRgb:        style.mutedText        ?? MUTED,
+    ruleRgb:         style.ruleColor        ?? RULE,
+    sectionTitleRgb: style.sectionTitleText ?? BLACK,
   };
 
   renderHeader(ctx, data);

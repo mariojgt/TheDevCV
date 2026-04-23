@@ -5,7 +5,8 @@ export type CreditAction =
   | 'ats_score'
   | 'ai_improve'
   | 'ai_optimize'
-  | 'ai_tailor';
+  | 'ai_tailor'
+  | 'portfolio_export';
 
 /**
  * Default costs used for UI gating before the DB is queried. The server is the
@@ -14,12 +15,13 @@ export type CreditAction =
  * server will still refuse or charge the correct amount.
  */
 export const CREDIT_COSTS: Record<CreditAction, number> = {
-  create_cv:    1,
-  export_pdf:   1,
-  ats_score:    2,
-  ai_improve:   1,
-  ai_optimize:  3,
-  ai_tailor:    5,
+  create_cv:        1,
+  export_pdf:       1,
+  ats_score:        2,
+  ai_improve:       1,
+  ai_optimize:      3,
+  ai_tailor:        5,
+  portfolio_export: 2,
 };
 
 export interface UserCredits {

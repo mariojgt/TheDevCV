@@ -870,6 +870,223 @@ Return ONLY JSON in this exact shape:
 }
 
 /**
+ * Polish a block of existing text — keep the user's facts but tighten the
+ * structure and flow. Used by the "Beautify" inline buttons on the Summary
+ * and Project description fields. Returns plain text with `\n\n` paragraph
+ * breaks where natural, which the portfolio renderer turns into real `<p>`
+ * tags for visually structured output. No markdown syntax is introduced, so
+ * the same string stays ATS-safe when reused in CV exports.
+ *
+ * Costs 1 `ai_improve` credit per call. TRUTHFULNESS: the prompt forbids
+ * inventing facts — only restructuring what's already there.
+ */
+export async function beautifyText(
+  text: string,
+  kind: 'summary' | 'project_description',
+  context: string,
+  settings: UserSettings,
+): Promise<string> {
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error('Nothing to beautify — add some text first.');
+
+  const kindPrompt = kind === 'summary'
+    ? `Rewrite this professional summary for maximum clarity, recruiter impact, and ATS compatibility.
+
+Requirements:
+- 3–4 sentences, 50–80 words total.
+- First sentence: years of experience + core expertise + target role keyword (verbatim where present in context).
+- Second sentence: 2–3 key technical skills using industry-standard terms.
+- Third sentence: biggest quantifiable achievement drawn from the source text.
+- Optional fourth: differentiator (domain, scale, leadership).
+- Active voice. Implied first person (never "I").`
+    : `Rewrite this project description for clarity and impact.
+
+Requirements:
+- 2–4 short sentences OR one short sentence + a short paragraph — whichever fits the facts best.
+- Lead with the problem the project solves or what it is (one-line hook).
+- Follow with how it works / key technical choices.
+- Close with quantifiable impact or scale when the source provides one (users, downloads, stars, revenue). Skip if absent — never fabricate.
+- If the source contains two clear ideas, separate them with a blank line (\\n\\n) so the portfolio renders them as distinct paragraphs.`;
+
+  return callAI(
+    `You are an editor that restructures CV / portfolio text for clarity and impact.
+${UNIVERSAL_CV_RULES}
+
+${kindPrompt}
+
+NEVER invent facts, tools, metrics, companies, or outcomes the source text doesn't contain. If a field would be stronger with a number but none is given, omit it rather than fabricate.
+
+Return ONLY the rewritten plain text — no JSON, no quotes, no explanation, no preamble. Use \\n\\n between paragraphs when the content naturally splits into more than one.`,
+    `CURRENT TEXT:\n${trimmed}\n\nCONTEXT:\n${context || '(none)'}`,
+    settings,
+    'ai_improve',
+    512,
+  ).then(s => s.trim());
+}
+
+/**
+ * One-click professional summary drafter. Synthesises a fresh 50–80-word
+ * summary from the candidate's *existing* Experience + Skills + Profile data
+ * — no free-text input needed from the user.
+ *
+ * Distinct from `improveSection('summary', …)` (which rewrites a summary the
+ * user already typed) and from the full-CV `optimizeCV` flow (which returns
+ * many suggestions for 3 credits). This is the empty-state / "I don't know
+ * how to start" entry point, costing 1 `ai_improve` credit like the project
+ * URL importer.
+ *
+ * TRUTHFULNESS: the prompt instructs the model to synthesise only from the
+ * provided CV data. No invented roles, tools, or metrics.
+ */
+export async function draftSummaryFromCV(
+  profile: Pick<CVProfile, 'target_role' | 'career_stage' | 'industry' | 'job_title' | 'full_name'>,
+  experience: CVExperience[],
+  skills: CVSkill[],
+  settings: UserSettings,
+): Promise<string> {
+  const recentRoles = experience.slice(0, 4).map(e => {
+    const dates = [e.start_date, e.is_current ? 'Present' : e.end_date].filter(Boolean).join(' – ');
+    const bullets = (e.achievements || []).slice(0, 3).filter(Boolean).map(a => `    • ${a}`).join('\n');
+    const techs = e.technologies?.length ? `  Stack: ${e.technologies.join(', ')}` : '';
+    return `- ${e.role || 'Role'} at ${e.company || 'Company'}${dates ? ` (${dates})` : ''}${techs ? `\n${techs}` : ''}${bullets ? `\n${bullets}` : ''}`;
+  }).join('\n');
+
+  const topSkills = skills.slice(0, 12).map(s => s.name).filter(Boolean).join(', ');
+
+  const contextLines = [
+    profile.target_role ? `Target role (weave in verbatim): ${profile.target_role}` : '',
+    profile.job_title ? `Current job title: ${profile.job_title}` : '',
+    profile.career_stage ? `Career stage: ${profile.career_stage}` : '',
+    profile.industry ? `Industry: ${profile.industry}` : '',
+    topSkills ? `Top skills: ${topSkills}` : '',
+    recentRoles ? `Recent roles:\n${recentRoles}` : '',
+  ].filter(Boolean).join('\n\n');
+
+  if (!contextLines.trim()) {
+    throw new Error('Add at least a target role, one skill, or one experience entry before drafting.');
+  }
+
+  return callAI(
+    `You are an ATS-optimised professional summary drafter.
+${UNIVERSAL_CV_RULES}
+
+TASK: Write a FRESH professional summary (3–4 sentences, 50–80 words) synthesised from the candidate's actual work history, technologies, and skills below. Follow SUMMARY SECTION rules strictly:
+- Sentence 1: years of experience (estimate from role dates) + core expertise + TARGET ROLE keyword VERBATIM where provided
+- Sentence 2: 2–3 key technical skills using industry-standard terms (exact names ATS scans for)
+- Sentence 3: biggest quantifiable achievement drawn from the candidate's actual bullets — preserve the metric verbatim
+- Optional 4th: differentiator (domain, scale, leadership)
+- Implied first person (never write "I")
+- Front-load keywords
+
+NEVER invent companies, tools, metrics, or experience the candidate doesn't have. Only synthesise from the provided data. If key facts are missing (e.g. no target role, no metrics), write the best honest summary with what's there — don't pad.
+
+Return ONLY the summary text — no JSON, no quotes, no explanation, no preamble.`,
+    contextLines,
+    settings,
+    'ai_improve',
+    512,
+  ).then(s => s.trim());
+}
+
+// ─── Project import from URL ───────────────────────────────────────────────
+// Strategy: GitHub URLs are the 90% case for dev CVs, and GitHub's public API
+// is CORS-friendly so we can fetch repo metadata + README directly from the
+// browser without a proxy. Anything else falls back to URL-only drafting —
+// the AI has no web access via our edge proxy, so results are weaker, but we
+// still surface a structured skeleton the user can complete.
+
+/** `github.com/owner/repo` (plus optional path/query) → `{owner, repo}`. */
+export function parseGitHubRepoUrl(input: string): { owner: string; repo: string } | null {
+  const trimmed = input.trim();
+  if (!trimmed) return null;
+  const match = trimmed.match(/github\.com[/:]([\w.-]+)\/([\w.-]+?)(?:\.git)?(?:[/?#]|$)/i);
+  if (!match) return null;
+  return { owner: match[1], repo: match[2] };
+}
+
+/**
+ * Pull a compact plain-text digest of a public GitHub repo: name, description,
+ * topics, primary language, star/fork counts, homepage, and the first ~2k
+ * chars of the README. The digest is what we feed to the drafting prompt.
+ */
+async function fetchGitHubRepoDigest(owner: string, repo: string): Promise<string> {
+  const base = 'https://api.github.com';
+  const headers = { Accept: 'application/vnd.github+json' } as const;
+  const metaRes = await fetch(`${base}/repos/${owner}/${repo}`, { headers });
+  if (metaRes.status === 404) throw new Error(`GitHub repo ${owner}/${repo} not found or private.`);
+  if (metaRes.status === 403) throw new Error('GitHub rate limit hit — try again in a minute.');
+  if (!metaRes.ok) throw new Error(`GitHub error ${metaRes.status}`);
+  const meta = await metaRes.json() as {
+    name?: string; full_name?: string; description?: string | null; homepage?: string | null;
+    language?: string | null; topics?: string[]; stargazers_count?: number; forks_count?: number;
+    default_branch?: string; pushed_at?: string; created_at?: string;
+  };
+
+  // README is optional — swallow errors rather than fail the whole import.
+  let readmeExcerpt = '';
+  try {
+    const branch = meta.default_branch || 'main';
+    for (const name of ['README.md', 'readme.md', 'README', 'readme']) {
+      const r = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${name}`);
+      if (r.ok) {
+        const txt = await r.text();
+        readmeExcerpt = txt.slice(0, 2000);
+        break;
+      }
+    }
+  } catch { /* ignore */ }
+
+  const parts = [
+    `Project: ${meta.name || `${owner}/${repo}`}`,
+    meta.description ? `Description: ${meta.description}` : '',
+    meta.homepage ? `Homepage: ${meta.homepage}` : '',
+    `Repo URL: https://github.com/${owner}/${repo}`,
+    meta.language ? `Primary language: ${meta.language}` : '',
+    meta.topics?.length ? `Topics: ${meta.topics.join(', ')}` : '',
+    typeof meta.stargazers_count === 'number' ? `Stars: ${meta.stargazers_count}` : '',
+    typeof meta.forks_count === 'number' ? `Forks: ${meta.forks_count}` : '',
+    meta.pushed_at ? `Last push: ${meta.pushed_at.slice(0, 10)}` : '',
+    readmeExcerpt ? `\nREADME (excerpt):\n${readmeExcerpt}` : '',
+  ].filter(Boolean);
+  return parts.join('\n');
+}
+
+/**
+ * Drop-in wrapper around `draftEntryFromText('project', …)` that accepts a
+ * URL. For GitHub URLs we fetch rich metadata + README first; for anything
+ * else we just pass the URL string (degraded: the AI can only guess from the
+ * URL itself). The returned project's `url` is always overridden with the
+ * user's original link so AI hallucinations can't silently swap it.
+ *
+ * Costs 1 credit (ai_improve) — same as free-text drafting.
+ */
+export async function draftProjectFromUrl(
+  url: string,
+  settings: UserSettings,
+): Promise<{ project: DraftedProject | null; source: 'github' | 'url-only' }> {
+  const trimmed = url.trim();
+  if (!trimmed) return { project: null, source: 'url-only' };
+
+  const gh = parseGitHubRepoUrl(trimmed);
+  let rawText: string;
+  let source: 'github' | 'url-only' = 'url-only';
+
+  if (gh) {
+    rawText = await fetchGitHubRepoDigest(gh.owner, gh.repo);
+    source = 'github';
+  } else {
+    rawText = `Project URL: ${trimmed}\n\n(No content fetched — infer only from the URL itself; leave fields blank if uncertain.)`;
+  }
+
+  const drafted = (await draftEntryFromText('project', rawText, '', settings)) as DraftedProject | null;
+  if (!drafted) return { project: null, source };
+  // Anchor the URL to what the user actually pasted — never trust the model
+  // to echo it back verbatim, especially for non-GitHub inputs.
+  drafted.url = trimmed;
+  return { project: drafted, source };
+}
+
+/**
  * Generate interview preparation questions based on a job description and the
  * candidate's CV. Returns role-specific behavioural, technical, and situational
  * questions with suggested approach angles so the user can rehearse before

@@ -55,7 +55,21 @@ export function useCV() {
     return { error: err?.message || null };
   };
 
-  const duplicateProfile = async (id: string): Promise<{ data: CVProfile | null; error: string | null }> => {
+  /**
+   * Duplicate a CV. `opts` lets the caller retarget the copy at a specific
+   * role variant (e.g. "Senior Software Engineer", "CTO") so users can fan a
+   * single base CV into several role-focused versions without re-entering
+   * every field. When omitted behaviour matches the original "(Copy)" copy.
+   *
+   * Charging for the duplicate is handled server-side by the
+   * `charge_cv_profile_credits` BEFORE INSERT trigger on `cv_profiles`
+   * (migration 00005), so we don't need to `consume_credits` here — the
+   * insert itself will raise `insufficient_credits` when balance is zero.
+   */
+  const duplicateProfile = async (
+    id: string,
+    opts: { targetRole?: string; versionName?: string } = {},
+  ): Promise<{ data: CVProfile | null; error: string | null }> => {
     let uid = userId;
     if (!uid) {
       const { data } = await supabase.auth.getUser();
@@ -68,12 +82,19 @@ export function useCV() {
     const { data: src, error: srcErr } = await supabase.from('cv_profiles').select('*').eq('id', id).single();
     if (srcErr || !src) return { data: null, error: srcErr?.message || 'Profile not found' };
 
-    // Create the duplicate profile
+    // Create the duplicate profile. When `opts.targetRole` is provided we
+    // override the source's target_role — this is the one field that
+    // genuinely differs between role-variant copies (feeds the ATS Tailor
+    // pipeline + AI summary drafter). Everything else is copied verbatim.
     const { id: _id, created_at, updated_at, ...profileFields } = src as CVProfile & { created_at: string; updated_at: string };
+    const role = opts.targetRole?.trim();
+    const nameOverride = opts.versionName?.trim();
+    const autoName = role ? `${src.version_name} — ${role}` : `${src.version_name} (Copy)`;
     const { data: newProfile, error: profErr } = await supabase.from('cv_profiles').insert({
       ...profileFields,
       user_id: uid,
-      version_name: `${src.version_name} (Copy)`,
+      version_name: nameOverride || autoName,
+      target_role: role || src.target_role,
       is_default: false,
     }).select().single();
     if (profErr || !newProfile) return { data: null, error: profErr?.message || 'Failed to duplicate' };
