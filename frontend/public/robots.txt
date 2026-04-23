@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /app/
+Disallow: /cv/
+Disallow: /billing/
+Disallow: /s/
+
+Sitemap: https://thedevcv.com/sitemap.xml
