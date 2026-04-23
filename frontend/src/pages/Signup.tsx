@@ -2,15 +2,17 @@ import { useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, Loader2 } from 'lucide-react';
 import Logo from '../components/Logo';
+import GoogleIcon from '../components/GoogleIcon';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Signup() {
-  const { signUp, signIn } = useAuth();
+  const { signUp, signIn, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const onSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -18,13 +20,23 @@ export default function Signup() {
     setLoading(true);
     try {
       await signUp(email, password);
-      // Try to immediately sign in (works when email confirmation is off).
       try { await signIn(email, password); } catch { /* email confirmation required */ }
       navigate('/', { replace: true });
     } catch (err: any) {
       setError(err?.message ?? 'Sign-up failed');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const onGoogle = async () => {
+    setError(null);
+    setGoogleLoading(true);
+    try {
+      await signInWithGoogle('/');
+    } catch (err: any) {
+      setError(err?.message ?? 'Google sign-up failed');
+      setGoogleLoading(false);
     }
   };
 
@@ -37,7 +49,19 @@ export default function Signup() {
         <form onSubmit={onSubmit} className="neo-card-brand p-6 space-y-5">
           <div>
             <h1 className="font-display text-2xl font-extrabold uppercase tracking-wide text-white mb-1">Create your account</h1>
-            <p className="text-sm text-muted">Free forever for your first CV.</p>
+            <p className="text-sm text-muted">10 free credits to get started — no card needed.</p>
+          </div>
+
+          <button type="button" onClick={onGoogle} disabled={googleLoading || loading}
+            className="neo-btn neo-btn-ghost w-full px-5 py-3 text-sm inline-flex items-center justify-center gap-2.5 disabled:opacity-60">
+            {googleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <GoogleIcon className="w-4 h-4" />}
+            Sign up with Google
+          </button>
+
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-neo-border" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-subtle">or email</span>
+            <div className="flex-1 h-px bg-neo-border" />
           </div>
 
           <label className="block">

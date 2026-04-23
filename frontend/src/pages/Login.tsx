@@ -2,16 +2,18 @@ import { useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { Mail, Lock, Loader2 } from 'lucide-react';
 import Logo from '../components/Logo';
+import GoogleIcon from '../components/GoogleIcon';
 import { useAuth } from '../contexts/AuthContext';
 
 export default function Login() {
-  const { signIn } = useAuth();
+  const { signIn, signInWithGoogle } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
 
   const from = (location.state as { from?: { pathname: string } })?.from?.pathname ?? '/';
 
@@ -29,6 +31,17 @@ export default function Login() {
     }
   };
 
+  const onGoogle = async () => {
+    setError(null);
+    setGoogleLoading(true);
+    try {
+      await signInWithGoogle(from);
+    } catch (err: any) {
+      setError(err?.message ?? 'Google sign-in failed');
+      setGoogleLoading(false);
+    }
+  };
+
   return (
     <div className="min-h-screen flex items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
@@ -39,6 +52,18 @@ export default function Login() {
           <div>
             <h1 className="font-display text-2xl font-extrabold uppercase tracking-wide text-white mb-1">Welcome back</h1>
             <p className="text-sm text-muted">Sign in to keep shipping.</p>
+          </div>
+
+          <button type="button" onClick={onGoogle} disabled={googleLoading || loading}
+            className="neo-btn neo-btn-ghost w-full px-5 py-3 text-sm inline-flex items-center justify-center gap-2.5 disabled:opacity-60">
+            {googleLoading ? <Loader2 className="w-4 h-4 animate-spin" /> : <GoogleIcon className="w-4 h-4" />}
+            Continue with Google
+          </button>
+
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-neo-border" />
+            <span className="text-[10px] font-bold uppercase tracking-wider text-subtle">or email</span>
+            <div className="flex-1 h-px bg-neo-border" />
           </div>
 
           <label className="block">

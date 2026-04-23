@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
-import { Sparkles, Target, Zap, FileCheck, ArrowRight, Check } from 'lucide-react';
+import { Sparkles, Target, Zap, FileCheck, ArrowRight, Check, Code2 } from 'lucide-react';
 import Logo from '../components/Logo';
+import { CREDIT_COSTS } from '../lib/types';
 
 const features = [
   { icon: FileCheck, title: '100% ATS-compliant',  copy: 'Single-column, semantic PDF output that every applicant-tracking system can parse.' },
@@ -9,8 +10,20 @@ const features = [
   { icon: Sparkles,  title: 'Built for devs',       copy: 'Import from GitHub, Markdown, or an existing PDF. Everything is keyboard-friendly.' },
 ];
 
-const freePerks = ['1 CV version', 'ATS score & gap analysis', 'PDF export (ATS template)', 'Unlimited edits & autosave'];
-const proPerks  = ['Unlimited CV versions', 'AI tailor-to-job', 'Premium templates', 'Cover-letter generator', 'Job pipeline & analytics', 'Priority AI queue'];
+const packs: { credits: number; price: string; unit: string; tagline: string; highlighted?: boolean }[] = [
+  { credits: 50,  price: '£5',  unit: '£0.10 / credit',  tagline: 'A couple of tailored applications.' },
+  { credits: 200, price: '£15', unit: '£0.075 / credit', tagline: 'The sweet spot for an active hunt.', highlighted: true },
+  { credits: 500, price: '£30', unit: '£0.06 / credit',  tagline: 'Career move, many tracks in flight.' },
+];
+
+const creditLegend: { cost: number; label: string }[] = [
+  { cost: CREDIT_COSTS.create_cv,   label: 'Create a CV' },
+  { cost: CREDIT_COSTS.export_pdf,  label: 'Export PDF' },
+  { cost: CREDIT_COSTS.ai_improve,  label: 'AI rewrite a section' },
+  { cost: CREDIT_COSTS.ats_score,   label: 'ATS gap analysis' },
+  { cost: CREDIT_COSTS.ai_optimize, label: 'Optimise full CV' },
+  { cost: CREDIT_COSTS.ai_tailor,   label: 'Tailor + cover letter' },
+];
 
 export default function Landing() {
   return (
@@ -51,10 +64,10 @@ export default function Landing() {
             </p>
             <div className="flex flex-wrap items-center justify-center gap-4">
               <Link to="/signup" className="neo-btn neo-btn-primary px-6 py-3 text-sm inline-flex items-center gap-2">
-                Start free — 1 CV <ArrowRight className="w-4 h-4" />
+                Start with 10 free credits <ArrowRight className="w-4 h-4" />
               </Link>
               <Link to="/pricing" className="neo-btn neo-btn-ghost px-6 py-3 text-sm">
-                See Pro features
+                See pricing
               </Link>
             </div>
           </div>
@@ -80,18 +93,41 @@ export default function Landing() {
         </div>
       </section>
 
-      {/* Pricing preview */}
-      <section className="max-w-4xl mx-auto px-4 sm:px-6 pb-20">
-        <h2 className="text-xl font-extrabold uppercase tracking-wide text-white mb-6 flex items-center gap-3">
+      {/* Pricing — credit packs, dev-to-dev honest pricing */}
+      <section className="max-w-5xl mx-auto px-4 sm:px-6 pb-20">
+        <div className="flex flex-wrap items-center gap-3 mb-3">
           <span className="inline-block w-2 h-6 bg-brand rounded-sm" />
-          Simple pricing
-        </h2>
-        <p className="text-sm text-muted mb-8 max-w-xl">
-          Start free. Go Pro when you're job-hunting hard.
+          <h2 className="text-xl font-extrabold uppercase tracking-wide text-white">
+            Pay as you go
+          </h2>
+          <span className="neo-tag neo-tag-accent text-[10px] -rotate-2 inline-flex items-center gap-1">
+            <Code2 className="w-3 h-3" /> By a dev, for devs
+          </span>
+        </div>
+        <p className="text-sm text-muted mb-8 max-w-2xl">
+          No subscription. No expiry. No feature paywalls. You get{' '}
+          <strong className="text-brand-light">10 free credits</strong> on signup — enough to
+          build, polish, and export your first CV. Top up only when you're actively hunting.
         </p>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <PricingCard name="Free" price="£0" copy="Everything you need to ship one great CV." perks={freePerks} cta="Start free" href="/signup" />
-          <PricingCard name="Pro"  price="£8" priceSuffix="/mo" copy="For active job hunters running multiple tracks." perks={proPerks} cta="Go Pro" href="/signup?plan=pro" highlighted />
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 mb-6">
+          {packs.map(p => <PackCard key={p.credits} {...p} />)}
+        </div>
+
+        <div className="neo-card p-5">
+          <div className="text-[10px] font-mono font-bold uppercase tracking-wider text-muted mb-3">
+            What credits buy
+          </div>
+          <ul className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-2 text-sm text-white">
+            {creditLegend.map(item => (
+              <li key={item.label} className="flex items-center gap-2">
+                <span className="font-mono text-xs font-bold text-brand-light tabular-nums min-w-7">
+                  {item.cost}c
+                </span>
+                <span className="text-muted">{item.label}</span>
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
 
@@ -102,37 +138,44 @@ export default function Landing() {
   );
 }
 
-function PricingCard({
-  name, price, priceSuffix, copy, perks, cta, href, highlighted = false,
+function PackCard({
+  credits, price, unit, tagline, highlighted = false,
 }: {
-  name: string; price: string; priceSuffix?: string; copy: string; perks: string[]; cta: string; href: string; highlighted?: boolean;
+  credits: number; price: string; unit: string; tagline: string; highlighted?: boolean;
 }) {
   return (
-    <div className={`${highlighted ? 'neo-card-brand' : 'neo-card'} p-6 overflow-hidden`}>
+    <div className={`${highlighted ? 'neo-card-brand' : 'neo-card'} p-6 overflow-hidden flex flex-col`}>
       {highlighted && (
         <div className="neo-header-bar -mx-6 -mt-6 mb-5">
-          <span>Most popular</span>
-          <span className="neo-tag neo-tag-accent text-[10px] -rotate-2">Pro</span>
+          <span>Best value</span>
+          <span className="neo-tag neo-tag-accent text-[10px] -rotate-2">Popular</span>
         </div>
       )}
       <div className="flex items-baseline justify-between mb-1">
-        <h3 className="text-2xl font-extrabold uppercase tracking-wide text-white">{name}</h3>
-        <span className="neo-price text-4xl">
-          {price}
-          {priceSuffix && <span className="text-base font-normal text-muted font-body normal-case ml-1">{priceSuffix}</span>}
-        </span>
+        <h3 className="text-xl font-extrabold uppercase tracking-wide text-white">{credits} credits</h3>
+        <span className="neo-price text-4xl">{price}</span>
       </div>
-      <p className="text-sm text-muted mb-5 mt-2">{copy}</p>
-      <ul className="space-y-2 mb-6">
-        {perks.map(p => (
-          <li key={p} className="flex items-start gap-2 text-sm text-white">
-            <Check className="w-4 h-4 text-brand-light shrink-0 mt-0.5" />
-            <span>{p}</span>
-          </li>
-        ))}
+      <div className="text-[11px] font-mono uppercase tracking-wider text-muted mb-3">{unit}</div>
+      <p className="text-sm text-muted mb-5">{tagline}</p>
+      <ul className="space-y-2 mb-6 text-sm text-white">
+        <li className="flex items-center gap-2">
+          <Check className="w-4 h-4 text-brand-light shrink-0" />
+          <span>~{Math.floor(credits / CREDIT_COSTS.ai_tailor)} full tailor-to-job runs</span>
+        </li>
+        <li className="flex items-center gap-2">
+          <Check className="w-4 h-4 text-brand-light shrink-0" />
+          <span>~{Math.floor(credits / CREDIT_COSTS.ai_optimize)} full CV optimisations</span>
+        </li>
+        <li className="flex items-center gap-2">
+          <Check className="w-4 h-4 text-brand-light shrink-0" />
+          <span>Never expires</span>
+        </li>
       </ul>
-      <Link to={href} className={`neo-btn ${highlighted ? 'neo-btn-primary' : 'neo-btn-ghost'} w-full px-5 py-3 text-sm`}>
-        {cta}
+      <Link
+        to="/signup"
+        className={`neo-btn ${highlighted ? 'neo-btn-primary' : 'neo-btn-ghost'} w-full px-5 py-3 text-sm mt-auto`}
+      >
+        Start free — top up later
       </Link>
     </div>
   );
