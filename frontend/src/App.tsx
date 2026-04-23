@@ -5,6 +5,8 @@ import Landing from './pages/Landing';
 import Login from './pages/Login';
 import Signup from './pages/Signup';
 import Pricing from './pages/Pricing';
+import Privacy from './pages/Privacy';
+import Terms from './pages/Terms';
 import BillingSuccess from './pages/BillingSuccess';
 import Account from './pages/Account';
 import Admin from './pages/Admin';
@@ -39,6 +41,8 @@ export default function App() {
       <Route path="/login"    element={<Login />} />
       <Route path="/signup"   element={<Signup />} />
       <Route path="/pricing"  element={<Pricing />} />
+      <Route path="/privacy"  element={<Privacy />} />
+      <Route path="/terms"    element={<Terms />} />
       <Route path="/billing/success" element={<BillingSuccess />} />
       <Route path="/s/:token" element={<PublicCV />} />
 

@@ -131,8 +131,26 @@ export default function Landing() {
         </div>
       </section>
 
-      <footer className="border-t-[3px] border-neo-border py-8 text-center text-xs font-bold uppercase tracking-wider text-muted">
-        The Dev CV — part of <a href="https://thedevrealm.com" className="text-brand-light hover:text-brand transition-colors">The Dev Realm</a>
+      <footer className="border-t-[3px] border-neo-border py-8 text-center text-xs font-bold uppercase tracking-wider text-muted space-y-3">
+        <div>
+          The Dev CV — part of{' '}
+          <a href="https://thedevrealm.com" className="text-brand-light hover:text-brand transition-colors">
+            The Dev Realm
+          </a>
+        </div>
+        <nav className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-[10px]">
+          <Link to="/privacy" className="hover:text-white transition-colors">Privacy</Link>
+          <span className="text-subtle">·</span>
+          <Link to="/terms" className="hover:text-white transition-colors">Terms</Link>
+          <span className="text-subtle">·</span>
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new CustomEvent('cv:open-cookie-prefs'))}
+            className="hover:text-white transition-colors uppercase tracking-wider"
+          >
+            Cookie preferences
+          </button>
+        </nav>
       </footer>
     </div>
   );
