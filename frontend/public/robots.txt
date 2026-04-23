@@ -5,4 +5,4 @@ Disallow: /cv/
 Disallow: /billing/
 Disallow: /s/
 
-Sitemap: https://thedevcv.com/sitemap.xml
+Sitemap: https://cv.thedevrealm.com/sitemap.xml
