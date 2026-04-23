@@ -458,10 +458,16 @@ TASK: Write a 3-5 sentence professional summary (50-80 words) tailored to the jo
  */
 export async function generateCoverLetter(
   profile: CVProfile, experience: CVExperience[], skills: CVSkill[],
-  jobDescription: string, company: string, position: string,
+  jobDescription: string, company: string | undefined, position: string | undefined,
   settings: UserSettings
 ): Promise<string> {
   const cvText = buildCVText(profile, experience, [], skills);
+
+  const contextLines = [
+    company ? `COMPANY: ${company}` : null,
+    position ? `POSITION: ${position}` : null,
+    `JOB DESCRIPTION:\n${jobDescription}`,
+  ].filter(Boolean).join('\n');
 
   const response = await callAI(
     `You write professional cover letters. The candidate's CV is provided — use only its facts.
@@ -470,12 +476,12 @@ ${UNIVERSAL_CV_RULES}
 TASK: Write a concise, compelling cover letter (3-4 paragraphs).
 Rules:
 - Address to "Hiring Manager" unless a name is provided.
-- Opening: Hook + why this specific role at this company (use the company name).
+- Opening: Hook + why this specific role at this company (use the company name if provided, otherwise refer to "your team" or "your company").
 - Middle: 2-3 specific achievements from the CV that match the job requirements — include the actual numbers.
 - Closing: Enthusiasm + call to action.
 - Professional but human tone — avoid the AI-tell vocabulary listed above.
 - Return ONLY the letter text.`,
-    `MY CV:\n${cvText}\n\nCOMPANY: ${company}\nPOSITION: ${position}\nJOB DESCRIPTION:\n${jobDescription}`,
+    `MY CV:\n${cvText}\n\n${contextLines}`,
     settings,
     'ai_improve'
   );
