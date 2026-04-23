@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Plus, Trash2, Eye, Download, Brain, ChevronDown, Palette, Coins, Sparkles, FileText, Wand2, Target, Layers, CheckCircle2, GripVertical, RefreshCw, Braces, MessageSquare, Copy, ClipboardList, TrendingUp } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Plus, Trash2, Eye, Download, Brain, ChevronDown, Palette, Coins, Sparkles, FileText, Wand2, Target, Layers, CheckCircle2, GripVertical, RefreshCw, Braces, MessageSquare, Copy, ClipboardList, TrendingUp, AlertCircle } from 'lucide-react';
 import { useCV } from '../hooks/useCV';
 import { useApp } from '../../../contexts/AppContext';
 import { useToast } from '../../../components/ui/Toast';
@@ -59,6 +59,27 @@ const AI_STEPS = [
   'Polishing language…',
   'Finalising suggestions…',
 ];
+
+/** Initial profile shape used for new CVs and as the baseline for dirty-tracking. */
+const DEFAULT_PROFILE: Partial<CVProfile> = {
+  version_name: 'Main CV', full_name: '', job_title: '', email: '', phone: '', location: '',
+  website: '', linkedin: '', github: '', portfolio: '', summary: '', target_role: '', keywords: [], is_default: true,
+  career_stage: null, industry: null, relevant_coursework: null, capstone_project: null,
+};
+
+/** Debounce window between the last edit and the autosave firing. */
+const AUTOSAVE_DEBOUNCE_MS = 2000;
+
+/** Compact relative timestamp used in the save-status chip. */
+function formatAgo(ts: number): string {
+  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
+  if (s < 5) return 'just now';
+  if (s < 60) return `${s}s ago`;
+  const m = Math.round(s / 60);
+  if (m < 60) return `${m}m ago`;
+  const h = Math.round(m / 60);
+  return `${h}h ago`;
+}
 
 /**
  * Full-screen overlay shown while the AI writer is running.
@@ -538,6 +559,279 @@ function SectionNav({ items }: { items: { id: string; label: string; state: 'emp
   );
 }
 
+// ─── Skills chip editor ───────────────────────────────────────────────────
+// Per-category palette. Keeps the chip list scannable at a glance and gives
+// each group a cheap visual identity without a heavy legend. Falls back to
+// `Other` for any category string we don't recognise (e.g. user imports from
+// LinkedIn with a custom category).
+const SKILL_CATEGORY_STYLES: Record<string, { dot: string; border: string; bg: string; text: string }> = {
+  'Technical':   { dot: 'bg-brand',        border: 'border-brand/40',        bg: 'bg-brand/10',        text: 'text-brand-light' },
+  'Frameworks':  { dot: 'bg-blue-400',     border: 'border-blue-400/40',     bg: 'bg-blue-400/10',     text: 'text-blue-300' },
+  'Languages':   { dot: 'bg-purple-400',   border: 'border-purple-400/40',   bg: 'bg-purple-400/10',   text: 'text-purple-300' },
+  'Databases':   { dot: 'bg-orange-400',   border: 'border-orange-400/40',   bg: 'bg-orange-400/10',   text: 'text-orange-300' },
+  'Cloud':       { dot: 'bg-cyan-400',     border: 'border-cyan-400/40',     bg: 'bg-cyan-400/10',     text: 'text-cyan-300' },
+  'Tools':       { dot: 'bg-amber-400',    border: 'border-amber-400/40',    bg: 'bg-amber-400/10',    text: 'text-amber-300' },
+  'Soft Skills': { dot: 'bg-pink-400',     border: 'border-pink-400/40',     bg: 'bg-pink-400/10',     text: 'text-pink-300' },
+  'Other':       { dot: 'bg-slate-400',    border: 'border-slate-400/40',    bg: 'bg-slate-400/10',    text: 'text-slate-300' },
+};
+const styleFor = (cat: string) => SKILL_CATEGORY_STYLES[cat] ?? SKILL_CATEGORY_STYLES.Other;
+
+const PROFICIENCY_FILL: Record<CVSkill['proficiency'], number> = {
+  beginner: 1, intermediate: 2, advanced: 3, expert: 4,
+};
+
+function ProficiencyDots({ level, dotClass }: { level: CVSkill['proficiency']; dotClass: string }) {
+  const filled = PROFICIENCY_FILL[level];
+  return (
+    <span className="inline-flex items-center gap-0.5" aria-label={`${level} proficiency`}>
+      {[1, 2, 3, 4].map(i => (
+        <span key={i} className={`w-1 h-1 rounded-full ${i <= filled ? dotClass : 'bg-neo-border'}`} />
+      ))}
+    </span>
+  );
+}
+
+/**
+ * A single skill rendered as a coloured pill. Click to open an inline popover
+ * with name/category/level/years. Empty-name chips auto-open and auto-delete
+ * on close, so "Add Skill" without typing is a no-op rather than a ghost row.
+ */
+function SkillChip({
+  skill, onChange, onDelete, autoOpen = false,
+}: {
+  skill: CVSkill;
+  onChange: (patch: Partial<CVSkill>) => void;
+  onDelete: () => void;
+  autoOpen?: boolean;
+}) {
+  const [editing, setEditing] = useState(autoOpen || !skill.name);
+  const wrapperRef = useRef<HTMLDivElement>(null);
+  const styles = styleFor(skill.category);
+
+  // Close popover, dropping empty-name chips so we don't leave dead rows.
+  const close = () => {
+    if (!skill.name.trim()) { onDelete(); return; }
+    setEditing(false);
+  };
+
+  useEffect(() => {
+    if (!editing) return;
+    const onDown = (e: MouseEvent) => {
+      if (!wrapperRef.current?.contains(e.target as Node)) close();
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+    window.addEventListener('mousedown', onDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDown);
+      window.removeEventListener('keydown', onKey);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, skill.name]);
+
+  return (
+    <div ref={wrapperRef} className="relative inline-block">
+      <button
+        type="button"
+        onClick={() => setEditing(v => !v)}
+        className={`group inline-flex items-center gap-1.5 pl-2.5 pr-2 py-1 rounded-full border-2 text-xs font-medium transition ${styles.border} ${styles.bg} ${styles.text} hover:brightness-125 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand`}
+      >
+        <span className="truncate max-w-[10rem]">{skill.name || 'New skill'}</span>
+        <ProficiencyDots level={skill.proficiency} dotClass={styles.dot} />
+      </button>
+      {editing && (
+        <div className="absolute top-full left-0 mt-1.5 z-30 w-64 rounded-md border-2 border-neo-border bg-surface shadow-xl p-2.5 space-y-2">
+          <input
+            autoFocus
+            type="text"
+            value={skill.name}
+            onChange={e => onChange({ name: e.target.value })}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); close(); } }}
+            placeholder="Skill name"
+            className="w-full neo-input px-2.5 py-1.5 text-sm"
+          />
+          <div className="grid grid-cols-2 gap-2">
+            <label className="flex flex-col gap-0.5 min-w-0">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Category</span>
+              <select
+                value={skill.category}
+                onChange={e => onChange({ category: e.target.value })}
+                className="neo-input px-2 py-1 text-xs"
+              >
+                {SKILL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </label>
+            <label className="flex flex-col gap-0.5 min-w-0">
+              <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Level</span>
+              <select
+                value={skill.proficiency}
+                onChange={e => onChange({ proficiency: e.target.value as CVSkill['proficiency'] })}
+                className="neo-input px-2 py-1 text-xs"
+              >
+                {PROFICIENCY_LEVELS.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </label>
+          </div>
+          <label className="flex flex-col gap-0.5">
+            <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Years (optional)</span>
+            <input
+              type="number"
+              min={0}
+              max={50}
+              value={skill.years ?? ''}
+              onChange={e => onChange({ years: e.target.value === '' ? null : Number(e.target.value) })}
+              placeholder="e.g. 3"
+              className="neo-input px-2 py-1 text-xs"
+            />
+          </label>
+          <div className="flex items-center justify-between pt-1">
+            <button
+              type="button"
+              onClick={onDelete}
+              className="text-[11px] text-red-400 hover:text-red-300 inline-flex items-center gap-1"
+            >
+              <Trash2 className="w-3 h-3" /> Delete
+            </button>
+            <button
+              type="button"
+              onClick={close}
+              className="text-[11px] text-muted hover:text-white"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Skills section rendered as category-grouped chip clusters with a bulk-paste
+ * entry at the top ("React, Python, Docker" → 3 chips). Replaces the stacked
+ * card-per-skill CRUD layout. Category for newly-added chips defaults to
+ * Technical; users can retag from the chip popover.
+ */
+function SkillsEditor({
+  skills, setSkills,
+}: {
+  skills: CVSkill[];
+  setSkills: React.Dispatch<React.SetStateAction<CVSkill[]>>;
+}) {
+  const [bulkInput, setBulkInput] = useState('');
+  // `autoOpenId` triggers the popover to open for the most recently added
+  // chip — either a manually-added blank or the last of a bulk paste.
+  const [autoOpenId, setAutoOpenId] = useState<number | null>(null);
+
+  const updateAt = (i: number, patch: Partial<CVSkill>) =>
+    setSkills(prev => prev.map((s, j) => (j === i ? { ...s, ...patch } : s)));
+
+  const removeAt = (i: number) =>
+    setSkills(prev => prev.filter((_, j) => j !== i));
+
+  const addOne = () => {
+    setSkills(prev => {
+      const next = [...prev, { id: '', profile_id: '', name: '', category: 'Technical', proficiency: 'intermediate' as const, years: null, sort_order: prev.length }];
+      setAutoOpenId(next.length - 1);
+      return next;
+    });
+  };
+
+  const addMany = (names: string[]) => {
+    const unique = names.map(n => n.trim()).filter(Boolean);
+    if (unique.length === 0) return;
+    setSkills(prev => [
+      ...prev,
+      ...unique.map((name, idx) => ({
+        id: '', profile_id: '', name,
+        category: 'Technical',
+        proficiency: 'intermediate' as const,
+        years: null,
+        sort_order: prev.length + idx,
+      })),
+    ]);
+  };
+
+  const commitBulk = () => {
+    const names = bulkInput.split(/[,\n]+/);
+    addMany(names);
+    setBulkInput('');
+  };
+
+  // Attach original index so chip handlers update the right row after
+  // grouping has reshuffled visual order.
+  const indexed = skills.map((skill, index) => ({ skill, index }));
+  const known = SKILL_CATEGORIES as readonly string[];
+  const grouped: { cat: string; items: { skill: CVSkill; index: number }[] }[] = [];
+  for (const cat of SKILL_CATEGORIES) {
+    const items = indexed.filter(x => x.skill.category === cat);
+    if (items.length) grouped.push({ cat, items });
+  }
+  // Preserve skills whose category isn't in the preset list (legacy rows,
+  // user-imported tags, etc.) rather than silently hiding them.
+  const leftover = indexed.filter(x => !known.includes(x.skill.category));
+  if (leftover.length) grouped.push({ cat: 'Other', items: leftover });
+
+  return (
+    <div className="space-y-3">
+      {/* Bulk paste + add */}
+      <div className="flex gap-2">
+        <input
+          type="text"
+          value={bulkInput}
+          onChange={e => setBulkInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && bulkInput.trim()) { e.preventDefault(); commitBulk(); } }}
+          placeholder="Paste a list: React, Python, Docker, Kubernetes…"
+          className="flex-1 min-w-0 neo-input px-3 py-2 text-sm"
+        />
+        <button
+          type="button"
+          onClick={() => { if (bulkInput.trim()) commitBulk(); else addOne(); }}
+          className="shrink-0 neo-btn neo-btn-ghost px-3 py-2 text-xs inline-flex items-center gap-1.5"
+          title={bulkInput.trim() ? 'Add pasted skills' : 'Add a single skill'}
+        >
+          <Plus className="w-4 h-4" /> {bulkInput.trim() ? 'Add all' : 'Add'}
+        </button>
+      </div>
+
+      {grouped.length === 0 ? (
+        <div className="rounded-md border-2 border-dashed border-neo-border/70 p-4 text-center text-xs text-muted">
+          No skills yet — paste a comma-separated list above, or click <strong className="text-white">Add</strong> for a blank chip.
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {grouped.map(({ cat, items }) => {
+            const styles = styleFor(cat);
+            return (
+              <div key={cat}>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className={`w-1.5 h-1.5 rounded-full ${styles.dot}`} />
+                  <span className="text-[10px] font-bold uppercase tracking-wide text-muted">{cat}</span>
+                  <span className="text-[10px] text-subtle">{items.length}</span>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {items.map(({ skill, index }) => (
+                    <SkillChip
+                      key={index}
+                      skill={skill}
+                      autoOpen={autoOpenId === index}
+                      onChange={patch => updateAt(index, patch)}
+                      onDelete={() => {
+                        removeAt(index);
+                        if (autoOpenId === index) setAutoOpenId(null);
+                      }}
+                    />
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function CVEditor() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -573,11 +867,24 @@ export default function CVEditor() {
   const [openProj, setOpenProj] = useState<Set<number>>(new Set());
 
   // Profile form
-  const [profile, setProfile] = useState<Partial<CVProfile>>({
-    version_name: 'Main CV', full_name: '', job_title: '', email: '', phone: '', location: '',
-    website: '', linkedin: '', github: '', portfolio: '', summary: '', target_role: '', keywords: [], is_default: true,
-    career_stage: null, industry: null, relevant_coursework: null, capstone_project: null,
-  });
+  const [profile, setProfile] = useState<Partial<CVProfile>>(DEFAULT_PROFILE);
+
+  // ── Autosave / dirty tracking ─────────────────────────────────────────────
+  // `lastSavedSigRef` holds the JSON signature of the state that currently
+  // matches DB. We compare it to a live `currentSig` memo to decide whether
+  // the editor is dirty. `lastSavedAt` drives the "Saved · Xs ago" chip, and
+  // `saveError` surfaces a red "Save failed" state when autosave errors out.
+  const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const lastSavedSigRef = useRef<string | null>(null);
+  const performSaveRef = useRef<(isAutosave: boolean) => Promise<void>>(async () => {});
+  // `tick` exists solely to rerender the status chip so the relative
+  // "Saved · Xs ago" label stays fresh.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    const i = setInterval(() => setTick(t => t + 1), 15_000);
+    return () => clearInterval(i);
+  }, []);
 
   // Sections
   const [experience, setExperience] = useState<CVExperience[]>([]);
@@ -586,6 +893,18 @@ export default function CVEditor() {
   const [certifications, setCertifications] = useState<CVCertification[]>([]);
   const [projects, setProjects] = useState<CVProject[]>([]);
   const [languages, setLanguages] = useState<CVLanguage[]>([]);
+
+  // Serialised snapshot of everything that gets persisted to the DB. Used as
+  // the source-of-truth for dirty detection vs. `lastSavedSigRef` and as the
+  // dependency for the autosave debounce.
+  const currentSig = useMemo(() => JSON.stringify({
+    profile, experience, education, skills, certifications, projects, languages,
+  }), [profile, experience, education, skills, certifications, projects, languages]);
+
+  const isNewCV = !id || id === 'new';
+  // Before the initial load sets the baseline we treat the editor as clean;
+  // otherwise the first render would flash "Unsaved" before we've even fetched.
+  const isDirty = lastSavedSigRef.current !== null && currentSig !== lastSavedSigRef.current;
 
   // CV completeness: weighted checklist of the fields that matter for a strong
   // CV. The % doubles as a gentle motivator and as a diagnostic the user can
@@ -614,16 +933,32 @@ export default function CVEditor() {
 
   useEffect(() => {
     const load = async () => {
-      if (!id || id === 'new') { setLoading(false); return; }
+      if (!id || id === 'new') {
+        // New CV: baseline is the empty default so the first keystroke flips
+        // the editor to "Unsaved". Autosave stays off until the user clicks
+        // Save (which spends a credit).
+        lastSavedSigRef.current = JSON.stringify({
+          profile: DEFAULT_PROFILE, experience: [], education: [], skills: [],
+          certifications: [], projects: [], languages: [],
+        });
+        setLoading(false);
+        return;
+      }
       const { data: p } = await supabase.from('cv_profiles').select('*').eq('id', id).single();
       if (p) {
-        setProfile(p);
         const [exp, edu, sk, cert, proj, lang] = await Promise.all([
           cv.fetchExperience(id), cv.fetchEducation(id), cv.fetchSkills(id),
           cv.fetchCertifications(id), cv.fetchProjects(id), cv.fetchLanguages(id),
         ]);
+        setProfile(p);
         setExperience(exp); setEducation(edu); setSkills(sk);
         setCertifications(cert); setProjects(proj); setLanguages(lang);
+        // Signature is computed from the just-fetched values (not from state,
+        // which won't have flushed yet on this tick).
+        lastSavedSigRef.current = JSON.stringify({
+          profile: p, experience: exp, education: edu, skills: sk,
+          certifications: cert, projects: proj, languages: lang,
+        });
       }
       setLoading(false);
     };
@@ -652,21 +987,43 @@ export default function CVEditor() {
     } catch { /* ignore malformed storage */ }
   }, []);
 
-  const handleSave = async () => {
+  /**
+   * Persist the full CV (profile + all sections) to Supabase.
+   *
+   * - Manual save (isAutosave=false): charges a credit on new-CV creation,
+   *   toasts errors, and navigates to the canonical /cv/:id URL afterwards.
+   * - Autosave (isAutosave=true): skipped entirely for new CVs so we never
+   *   silently charge a credit. Errors surface through the save-status chip
+   *   rather than a toast.
+   *
+   * On success we update `lastSavedSigRef` to the signature captured at save
+   * *start* — so edits the user made during the round-trip stay marked dirty
+   * and trigger another autosave.
+   */
+  const performSave = async (isAutosave: boolean) => {
     if (!profile.full_name?.trim()) return;
+    if (saving) return;
     const isNew = !id || id === 'new';
+    if (isNew && isAutosave) return; // never autosave a new CV — would charge a credit
     if (isNew && !hasCredits('create_cv')) {
       toast(`Creating a CV costs ${costOf('create_cv')} credit — top up to continue.`, 'error');
       return;
     }
+
+    const sigAtStart = currentSig;
     setSaving(true);
+    setSaveError(null);
+
     const { data: saved, error: saveErr } = await cv.saveProfile(isNew ? profile : { ...profile, id });
     if (saveErr || !saved) {
       setSaving(false);
-      if (saveErr?.toLowerCase().includes('insufficient_credits')) {
-        toast('Not enough credits to create a new CV.', 'error');
-      } else if (saveErr) {
-        toast(saveErr, 'error');
+      setSaveError(saveErr || 'Save failed');
+      if (!isAutosave) {
+        if (saveErr?.toLowerCase().includes('insufficient_credits')) {
+          toast('Not enough credits to create a new CV.', 'error');
+        } else if (saveErr) {
+          toast(saveErr, 'error');
+        }
       }
       return;
     }
@@ -705,9 +1062,56 @@ export default function CVEditor() {
     for (const proj of projects) await cv.saveProject(proj, pid);
     for (const lang of languages) await cv.saveLanguage(lang, pid);
 
+    lastSavedSigRef.current = sigAtStart;
+    setLastSavedAt(Date.now());
+    setSaveError(null);
     setSaving(false);
-    navigate(`/cv/${pid}`);
+
+    // Only redirect on the very first save of a new CV; autosaves on an
+    // existing CV must not nuke scroll position or in-flight form focus.
+    if (isNew && !isAutosave) navigate(`/cv/${pid}`);
   };
+
+  // Keep a ref of the latest performSave so window-level listeners (Cmd+S,
+  // debounce timer) always see the freshest closure without needing to
+  // re-bind on every render.
+  performSaveRef.current = performSave;
+
+  const handleSave = () => performSave(false);
+
+  // ── Autosave: debounced, fires only when dirty and not a new CV. ─────────
+  useEffect(() => {
+    if (isNewCV) return;
+    if (loading) return;
+    if (!isDirty) return;
+    if (saving) return;
+    if (!profile.full_name?.trim()) return;
+    const timer = setTimeout(() => { performSaveRef.current(true); }, AUTOSAVE_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [currentSig, isDirty, saving, isNewCV, loading, profile.full_name]);
+
+  // ── Cmd+S / Ctrl+S: manual save shortcut. ────────────────────────────────
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        performSaveRef.current(false);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  // ── beforeunload: warn on tab close/reload while dirty or mid-save. ──────
+  useEffect(() => {
+    if (!isDirty && !saving) return;
+    const onBeforeUnload = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = '';
+    };
+    window.addEventListener('beforeunload', onBeforeUnload);
+    return () => window.removeEventListener('beforeunload', onBeforeUnload);
+  }, [isDirty, saving]);
 
   const handleAIError = (err: unknown, label: string) => {
     if (err instanceof InsufficientCreditsError) {
@@ -915,7 +1319,6 @@ export default function CVEditor() {
     setEducation(prev => [...prev, { id: '', profile_id: '', institution: '', degree: '', field: '', location: '', start_date: '', end_date: '', grade: '', description: '', sort_order: prev.length, created_at: '' }]);
     setOpenEdu(prev => new Set(prev).add(education.length));
   };
-  const addSkill = () => setSkills(prev => [...prev, { id: '', profile_id: '', name: '', category: 'Technical', proficiency: 'intermediate', years: null, sort_order: prev.length }]);
   const addCert = () => setCertifications(prev => [...prev, { id: '', profile_id: '', name: '', issuer: '', date_obtained: '', expiry_date: '', credential_id: '', url: '', sort_order: prev.length }]);
   const addProject = () => {
     setProjects(prev => [...prev, { id: '', profile_id: '', name: '', description: '', url: '', technologies: [], highlights: [], start_date: '', end_date: '', sort_order: prev.length }]);
@@ -1113,10 +1516,31 @@ export default function CVEditor() {
             >
               <Eye className="w-4 h-4" />
             </button>
+            {/* Save-status chip. Hidden for new CVs (where Save is the only
+                meaningful action) and while the editor is still loading. */}
+            {!isNewCV && !loading && (
+              <div
+                className="hidden sm:flex items-center gap-1.5 px-2 text-[11px] font-medium whitespace-nowrap"
+                aria-live="polite"
+                title={lastSavedAt ? `Last saved ${new Date(lastSavedAt).toLocaleTimeString()}` : undefined}
+              >
+                {saving ? (
+                  <><Loader2 className="w-3 h-3 animate-spin text-brand-light" /><span className="text-muted">Saving…</span></>
+                ) : saveError ? (
+                  <><AlertCircle className="w-3 h-3 text-red-400" /><span className="text-red-400">Save failed</span></>
+                ) : isDirty ? (
+                  <><span className="w-1.5 h-1.5 rounded-full bg-amber-400" /><span className="text-muted">Unsaved</span></>
+                ) : lastSavedAt ? (
+                  <><CheckCircle2 className="w-3 h-3 text-brand-light" /><span className="text-muted">Saved · {formatAgo(lastSavedAt)}</span></>
+                ) : (
+                  <><CheckCircle2 className="w-3 h-3 text-muted" /><span className="text-muted">All changes saved</span></>
+                )}
+              </div>
+            )}
             <button
               onClick={handleSave}
               disabled={saving || !profile.full_name?.trim() || (!isEdit && !hasCredits('create_cv'))}
-              title={!isEdit ? `Creating a new CV · ${costOf('create_cv')} credit (balance: ${credits})` : undefined}
+              title={!isEdit ? `Creating a new CV · ${costOf('create_cv')} credit (balance: ${credits})` : 'Save now (⌘S / Ctrl+S)'}
               className="neo-btn neo-btn-ghost px-4 py-2.5 text-xs inline-flex items-center gap-2"
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
@@ -1487,35 +1911,7 @@ export default function CVEditor() {
             <FieldTip>
               <strong>8–12 skills</strong> that match the job description. Use <strong>exact JD terminology</strong> ("CI/CD" not "continuous integration", "React.js" not "React"). Don't dump 30+ generic items. <em>Source: uppl.ai, Workday guide.</em>
             </FieldTip>
-            <div className="space-y-2">
-              {skills.map((sk, i) => (
-                <div key={i} className="rounded-md border-2 border-neo-border/70 bg-surface/40 p-2.5 space-y-2">
-                  <div className="flex gap-2 items-center">
-                    <input type="text" value={sk.name} onChange={e => { const n = [...skills]; n[i] = { ...n[i], name: e.target.value }; setSkills(n); }}
-                      placeholder="e.g., React.js, Python, Docker" className="flex-1 min-w-0 neo-input px-2.5 py-1.5 text-sm" />
-                    <button onClick={() => setSkills(prev => prev.filter((_, j) => j !== i))} aria-label="Remove skill"
-                      className="shrink-0 neo-btn neo-btn-ghost p-1.5 text-red-400 hover:border-red-500 hover:bg-red-500/10"><Trash2 className="w-4 h-4" /></button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                    <label className="flex flex-col gap-0.5 min-w-0">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Category</span>
-                      <select value={sk.category} onChange={e => { const n = [...skills]; n[i] = { ...n[i], category: e.target.value }; setSkills(n); }}
-                        className="neo-input px-2 py-1.5 text-xs">
-                        {SKILL_CATEGORIES.map(c => <option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </label>
-                    <label className="flex flex-col gap-0.5 min-w-0">
-                      <span className="text-[10px] font-bold uppercase tracking-wide text-muted">Level</span>
-                      <select value={sk.proficiency} onChange={e => { const n = [...skills]; n[i] = { ...n[i], proficiency: e.target.value as any }; setSkills(n); }}
-                        className="neo-input px-2 py-1.5 text-xs">
-                        {PROFICIENCY_LEVELS.map(p => <option key={p} value={p}>{p}</option>)}
-                      </select>
-                    </label>
-                  </div>
-                </div>
-              ))}
-              <button onClick={addSkill} className="neo-btn neo-btn-ghost px-3 py-1.5 text-xs inline-flex items-center gap-1.5"><Plus className="w-4 h-4" /> Add Skill</button>
-            </div>
+            <SkillsEditor skills={skills} setSkills={setSkills} />
           </Section>
 
           {/* Languages */}
