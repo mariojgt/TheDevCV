@@ -1,4 +1,5 @@
 import type { CVProfile, CVExperience, CVEducation, CVSkill, CVCertification, CVProject, CVLanguage } from '../types';
+import { mdToReact } from '../lib/markdown';
 
 /**
  * Executive template — serif, navy accent, left accent bar on the name block.
@@ -89,7 +90,7 @@ export default function CVTemplateExecutive({
         <p style={{
           margin: '0 0 20px', color: BODY, fontSize: '10pt', lineHeight: 1.6,
         }}>
-          {profile.summary}
+          {mdToReact(profile.summary)}
         </p>
       )}
 
@@ -98,7 +99,7 @@ export default function CVTemplateExecutive({
         <SerifSection title="Selected Achievements">
           <ul style={{ margin: 0, paddingLeft: '20px', listStyleType: 'disc' }}>
             {selectedAchievements.map((a, i) => (
-              <li key={i} style={{ fontSize: '10pt', color: BODY, marginBottom: '4px', lineHeight: 1.55 }}>{a}</li>
+              <li key={i} style={{ fontSize: '10pt', color: BODY, marginBottom: '4px', lineHeight: 1.55 }}>{mdToReact(a)}</li>
             ))}
           </ul>
         </SerifSection>
@@ -125,13 +126,13 @@ export default function CVTemplateExecutive({
                 )}
                 {exp.description && (
                   <p style={{ margin: '6px 0 0', fontSize: '10pt', color: BODY, lineHeight: 1.55 }}>
-                    {exp.description}
+                    {mdToReact(exp.description)}
                   </p>
                 )}
                 {exp.achievements.length > 0 && (
                   <ul style={{ margin: '6px 0 0', paddingLeft: '20px', listStyleType: 'disc' }}>
                     {exp.achievements.map((a, j) => (
-                      <li key={j} style={{ fontSize: '10pt', color: BODY, marginBottom: '3px', lineHeight: 1.55 }}>{a}</li>
+                      <li key={j} style={{ fontSize: '10pt', color: BODY, marginBottom: '3px', lineHeight: 1.55 }}>{mdToReact(a)}</li>
                     ))}
                   </ul>
                 )}
@@ -160,7 +161,7 @@ export default function CVTemplateExecutive({
                   )}
                 </div>
                 {edu.description && (
-                  <p style={{ margin: '3px 0 0', fontSize: '9.5pt', color: BODY, lineHeight: 1.5 }}>{edu.description}</p>
+                  <p style={{ margin: '3px 0 0', fontSize: '9.5pt', color: BODY, lineHeight: 1.5 }}>{mdToReact(edu.description)}</p>
                 )}
               </div>
             ))}
@@ -191,7 +192,7 @@ export default function CVTemplateExecutive({
                 {p.url && <span style={{ color: MUTED }}> — {p.url}</span>}
               </div>
               {p.description && (
-                <p style={{ margin: '2px 0 0', fontSize: '9.5pt', color: BODY, lineHeight: 1.55 }}>{p.description}</p>
+                <p style={{ margin: '2px 0 0', fontSize: '9.5pt', color: BODY, lineHeight: 1.55 }}>{mdToReact(p.description)}</p>
               )}
               {p.highlights.length > 0 && (
                 <ul style={{ margin: '2px 0 0', paddingLeft: '20px', listStyleType: 'disc' }}>

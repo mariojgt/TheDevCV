@@ -10,6 +10,7 @@
  */
 import type { CVProfile, CVExperience, CVProject, CVSkill } from '../types';
 import { parseGitHubRepoUrl } from './ai';
+import { mdToHtml, mdToPlain } from './markdown';
 
 // ─── Types & defaults ─────────────────────────────────────────────────────
 
@@ -132,13 +133,13 @@ function stripProtocol(url: string): string {
 }
 
 /**
- * Convert plain text with newlines into structured HTML:
+ * Convert text with newlines into structured HTML, applying the limited
+ * inline-markdown subset emitted by the editor (**bold**, *italic*, links).
  *   blank line → new `<p>`
  *   single newline → `<br>`
- * Every segment is HTML-escaped — this is NOT a markdown renderer, no tags
- * leak through. Empty string returns empty string. Used for hero tagline,
- * summary, and project descriptions after the "Beautify with AI" action has
- * optionally inserted paragraph breaks.
+ * `mdToHtml` HTML-escapes the underlying text before inserting markup, so no
+ * raw tags leak through. Used for hero tagline, summary, and project
+ * descriptions.
  */
 function nl2html(text: string | null | undefined): string {
   const v = String(text ?? '').trim();
@@ -146,8 +147,8 @@ function nl2html(text: string | null | undefined): string {
   return v
     .split(/\n{2,}/)
     .map(block => {
-      const escaped = esc(block).replace(/\n/g, '<br>');
-      return `<p>${escaped}</p>`;
+      const lines = block.split('\n').map(line => mdToHtml(line));
+      return `<p>${lines.join('<br>')}</p>`;
     })
     .join('');
 }
@@ -242,7 +243,7 @@ function renderExperience({ experience }: RenderCtx): string {
       <div class="exp-body">
         <h3>${esc(e.role || 'Role')}</h3>
         <div class="exp-company">${esc(e.company || '')}${e.location ? ` · ${esc(e.location)}` : ''}</div>
-        ${bullets.length ? `<ul class="card-list">${bullets.map(b => `<li>${esc(b)}</li>`).join('')}</ul>` : ''}
+        ${bullets.length ? `<ul class="card-list">${bullets.map(b => `<li>${mdToHtml(b)}</li>`).join('')}</ul>` : ''}
         ${tech.length ? `<div class="chips">${tech.map(t => `<span class="chip chip-sm">${esc(t)}</span>`).join('')}</div>` : ''}
       </div>
     </article>`;
@@ -455,7 +456,7 @@ export function generatePortfolioHtml(
   const ctx: RenderCtx = { profile, experience, projects, skills, config, decorations };
   const title = esc(`${profile.full_name || 'Portfolio'} — ${profile.target_role || profile.job_title || 'Portfolio'}`);
   const desc = esc(
-    (config.taglineOverride?.trim() || profile.summary || '').slice(0, 160),
+    mdToPlain(config.taglineOverride?.trim() || profile.summary || '').slice(0, 160),
   );
 
   const body: string[] = [];

@@ -1,4 +1,5 @@
 import type { CVProfile, CVExperience, CVEducation, CVSkill, CVCertification, CVProject, CVLanguage } from '../types';
+import { mdToReact } from '../lib/markdown';
 
 /**
  * Neo Dark template — deep navy + brand-green.
@@ -106,7 +107,7 @@ export default function CVTemplateNeoDark({
         {/* ── SUMMARY ─────────────────────── */}
         {profile.summary && (
           <DarkSection title="Summary">
-            <p style={{ margin: 0, color: BODY, fontSize: '9.5pt', lineHeight: 1.65 }}>{profile.summary}</p>
+            <p style={{ margin: 0, color: BODY, fontSize: '9.5pt', lineHeight: 1.65 }}>{mdToReact(profile.summary)}</p>
           </DarkSection>
         )}
 
@@ -140,7 +141,7 @@ export default function CVTemplateNeoDark({
                   {exp.achievements.length > 0 && (
                     <ul style={{ margin: '5px 0 0', paddingLeft: '16px', listStyleType: 'disc' }}>
                       {exp.achievements.map((a, j) => (
-                        <li key={j} style={{ fontSize: '9.5pt', color: BODY, marginBottom: '2px', lineHeight: 1.5 }}>{a}</li>
+                        <li key={j} style={{ fontSize: '9.5pt', color: BODY, marginBottom: '2px', lineHeight: 1.5 }}>{mdToReact(a)}</li>
                       ))}
                     </ul>
                   )}
@@ -199,7 +200,7 @@ export default function CVTemplateNeoDark({
                   {p.url && <span style={{ fontWeight: 400, color: BRAND_LT }}> — {p.url}</span>}
                 </div>
                 {p.description && (
-                  <div style={{ fontSize: '9pt', color: BODY, marginTop: '1px' }}>{p.description}</div>
+                  <div style={{ fontSize: '9pt', color: BODY, marginTop: '1px' }}>{mdToReact(p.description)}</div>
                 )}
                 {p.highlights.length > 0 && (
                   <ul style={{ margin: '3px 0 0', paddingLeft: '16px', listStyleType: 'disc' }}>

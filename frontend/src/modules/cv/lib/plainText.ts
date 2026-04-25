@@ -2,6 +2,7 @@ import type {
   CVProfile, CVExperience, CVEducation, CVSkill,
   CVCertification, CVProject, CVLanguage,
 } from '../types';
+import { mdToPlain } from './markdown';
 
 /**
  * Plain-text (.txt) ATS-safe export — pure ASCII, no tables, no Unicode
@@ -49,7 +50,7 @@ export function toPlainText(
 
   if (profile.summary?.trim()) {
     pushSection(lines, 'Summary');
-    lines.push(profile.summary.trim());
+    lines.push(mdToPlain(profile.summary).trim());
   }
 
   if (experience.length) {
@@ -59,8 +60,11 @@ export function toPlainText(
       lines.push(`${e.role} - ${e.company}`);
       const meta = [e.location, formatDateRange(e.start_date, e.end_date, e.is_current)].filter(Boolean);
       if (meta.length) lines.push(meta.join(' | '));
-      if (e.description?.trim()) lines.push(e.description.trim());
-      e.achievements.forEach((a) => { if (a.trim()) lines.push(`- ${a.trim()}`); });
+      if (e.description?.trim()) lines.push(mdToPlain(e.description).trim());
+      e.achievements.forEach((a) => {
+        const plain = mdToPlain(a).trim();
+        if (plain) lines.push(`- ${plain}`);
+      });
       if (e.technologies.length) lines.push(`Technologies: ${e.technologies.join(', ')}`);
     });
   }
@@ -74,7 +78,7 @@ export function toPlainText(
       const meta = [ed.location, formatDateRange(ed.start_date, ed.end_date)].filter(Boolean);
       if (meta.length) lines.push(meta.join(' | '));
       if (ed.grade) lines.push(`Grade: ${ed.grade}`);
-      if (ed.description?.trim()) lines.push(ed.description.trim());
+      if (ed.description?.trim()) lines.push(mdToPlain(ed.description).trim());
     });
   }
 
@@ -113,7 +117,7 @@ export function toPlainText(
       lines.push(p.url ? `${p.name} - ${p.url}` : p.name);
       const range = formatDateRange(p.start_date, p.end_date);
       if (range) lines.push(range);
-      if (p.description?.trim()) lines.push(p.description.trim());
+      if (p.description?.trim()) lines.push(mdToPlain(p.description).trim());
       p.highlights.forEach((h) => { if (h.trim()) lines.push(`- ${h.trim()}`); });
       if (p.technologies.length) lines.push(`Technologies: ${p.technologies.join(', ')}`);
     });

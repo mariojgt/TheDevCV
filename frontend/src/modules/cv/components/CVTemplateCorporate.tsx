@@ -1,4 +1,5 @@
 import type { CVProfile, CVExperience, CVEducation, CVSkill, CVCertification, CVProject, CVLanguage } from '../types';
+import { mdToReact } from '../lib/markdown';
 
 /**
  * Corporate template — sans-serif, blue double-rule sections.
@@ -82,7 +83,7 @@ export default function CVTemplateCorporate({
       {/* ── SUMMARY ─────────────────────────────── */}
       {profile.summary && (
         <RuleSection title="Summary">
-          <p style={{ margin: 0, color: BODY, fontSize: '10pt', lineHeight: 1.6 }}>{profile.summary}</p>
+          <p style={{ margin: 0, color: BODY, fontSize: '10pt', lineHeight: 1.6 }}>{mdToReact(profile.summary)}</p>
         </RuleSection>
       )}
 
@@ -108,7 +109,7 @@ export default function CVTemplateCorporate({
                 {exp.achievements.length > 0 && (
                   <ul style={{ margin: '4px 0 0', paddingLeft: '18px', listStyleType: 'disc' }}>
                     {exp.achievements.map((a, j) => (
-                      <li key={j} style={{ fontSize: '9.5pt', color: BODY, marginBottom: '2px', lineHeight: 1.5 }}>{a}</li>
+                      <li key={j} style={{ fontSize: '9.5pt', color: BODY, marginBottom: '2px', lineHeight: 1.5 }}>{mdToReact(a)}</li>
                     ))}
                   </ul>
                 )}
@@ -169,7 +170,7 @@ export default function CVTemplateCorporate({
                 {p.url && <span style={{ color: ACCENT }}> — {p.url}</span>}
               </div>
               {p.description && (
-                <p style={{ margin: '2px 0 0', fontSize: '9.5pt', color: BODY }}>{p.description}</p>
+                <p style={{ margin: '2px 0 0', fontSize: '9.5pt', color: BODY }}>{mdToReact(p.description)}</p>
               )}
               {p.highlights.length > 0 && (
                 <ul style={{ margin: '2px 0 0', paddingLeft: '18px', listStyleType: 'disc' }}>

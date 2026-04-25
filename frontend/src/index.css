@@ -313,6 +313,59 @@ h1, h2, h3 {
   box-shadow: 0 0 0 3px rgba(13, 150, 104, 0.25);
 }
 
+/* ── Rich-text editor (TipTap) ───────────────────────── */
+.tiptap-shell {
+  display: flex;
+  flex-direction: column;
+}
+.tiptap-shell:focus-within {
+  border-color: var(--color-brand);
+  box-shadow: 0 0 0 3px rgba(13, 150, 104, 0.25);
+}
+.tiptap-shell .tiptap-content {
+  padding: 0.5rem 0.625rem;
+  min-height: var(--tiptap-min-h, 80px);
+  font-size: 0.875rem;
+  line-height: 1.5;
+  color: #fff;
+  outline: none;
+}
+.tiptap-shell .tiptap-content > *:first-child { margin-top: 0; }
+.tiptap-shell .tiptap-content > *:last-child  { margin-bottom: 0; }
+.tiptap-shell .tiptap-content p {
+  margin: 0 0 0.5rem;
+}
+.tiptap-shell .tiptap-content ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+  margin: 0;
+}
+.tiptap-shell .tiptap-content li {
+  margin-bottom: 0.25rem;
+}
+.tiptap-shell .tiptap-content li > p {
+  margin: 0;
+}
+.tiptap-shell .tiptap-content a {
+  color: var(--color-brand-light);
+  text-decoration: underline;
+}
+.tiptap-shell .tiptap-content strong { font-weight: 700; }
+.tiptap-shell .tiptap-content em { font-style: italic; }
+/* Placeholder — TipTap's @tiptap/extension-placeholder writes
+   data-placeholder on each empty node and tags the doc-empty
+   first node with .is-editor-empty. We render that via ::before
+   so it takes no layout space (height: 0; float: left). */
+.tiptap-shell .tiptap-content p.is-editor-empty:first-child::before,
+.tiptap-shell .tiptap-content li.is-empty:first-child::before {
+  content: attr(data-placeholder);
+  color: var(--color-subtle);
+  pointer-events: none;
+  float: left;
+  height: 0;
+  white-space: pre;
+}
+
 /* ── Table ────────────────────────────────────────────── */
 .neo-table {
   width: 100%;

@@ -1,4 +1,5 @@
 import type { CVProfile, CVExperience, CVEducation, CVSkill, CVCertification, CVProject, CVLanguage } from '../types';
+import { mdToReact } from '../lib/markdown';
 
 /**
  * Professional template — recruiter-friendly, single-column, ATS-safe.
@@ -73,7 +74,7 @@ export default function CVTemplateProfessional({
       {profile.summary && (
         <LabeledSection label="Profile">
           <p style={{ margin: 0, color: BODY, fontSize: '9.5pt', lineHeight: 1.6 }}>
-            {profile.summary}
+            {mdToReact(profile.summary)}
           </p>
         </LabeledSection>
       )}
@@ -97,26 +98,30 @@ export default function CVTemplateProfessional({
                 )}
                 {exp.description && (
                   <p style={{ margin: '4px 0 0', fontSize: '9.5pt', color: BODY, lineHeight: 1.5 }}>
-                    {exp.description}
+                    {mdToReact(exp.description)}
                   </p>
                 )}
                 {exp.achievements.length > 0 && (
                   <ul style={{ margin: '6px 0 0', paddingLeft: '18px', listStyleType: 'disc' }}>
                     {exp.achievements.map((a, j) => {
-                      // "Label: rest" style for impact — but keep plain text so ATS
-                      // still reads the whole bullet as a single sentence.
-                      const colonIdx = a.indexOf(':');
-                      if (colonIdx > 0 && colonIdx < 50) {
-                        const label = a.slice(0, colonIdx);
-                        const rest = a.slice(colonIdx + 1);
-                        return (
-                          <li key={j} style={{ fontSize: '9.5pt', color: BODY, marginBottom: '3px', lineHeight: 1.5 }}>
-                            <strong style={{ color: TEXT }}>{label}:</strong>{rest}
-                          </li>
-                        );
+                      // If the user hasn't applied any inline markdown, keep the
+                      // template's signature "Label: rest" auto-bold heuristic.
+                      // Otherwise, defer entirely to the user's own formatting.
+                      const hasMarkdown = /\*\*|\*|\[[^\]]+\]\(/.test(a);
+                      if (!hasMarkdown) {
+                        const colonIdx = a.indexOf(':');
+                        if (colonIdx > 0 && colonIdx < 50) {
+                          const label = a.slice(0, colonIdx);
+                          const rest = a.slice(colonIdx + 1);
+                          return (
+                            <li key={j} style={{ fontSize: '9.5pt', color: BODY, marginBottom: '3px', lineHeight: 1.5 }}>
+                              <strong style={{ color: TEXT }}>{label}:</strong>{rest}
+                            </li>
+                          );
+                        }
                       }
                       return (
-                        <li key={j} style={{ fontSize: '9.5pt', color: BODY, marginBottom: '3px', lineHeight: 1.5 }}>{a}</li>
+                        <li key={j} style={{ fontSize: '9.5pt', color: BODY, marginBottom: '3px', lineHeight: 1.5 }}>{mdToReact(a)}</li>
                       );
                     })}
                   </ul>
@@ -177,7 +182,7 @@ export default function CVTemplateProfessional({
                 {p.url && <span style={{ color: MUTED }}> — {p.url}</span>}
               </div>
               {p.description && (
-                <p style={{ margin: '2px 0 0', fontSize: '9pt', color: BODY }}>{p.description}</p>
+                <p style={{ margin: '2px 0 0', fontSize: '9pt', color: BODY }}>{mdToReact(p.description)}</p>
               )}
               {p.highlights.length > 0 && (
                 <ul style={{ margin: '2px 0 0', paddingLeft: '18px', listStyleType: 'disc' }}>

@@ -1,4 +1,5 @@
 import type { CVProfile, CVExperience, CVEducation, CVSkill, CVCertification, CVProject, CVLanguage } from '../types';
+import { mdToReact } from '../lib/markdown';
 
 /**
  * ATS-compliant, compact CV template.
@@ -71,7 +72,7 @@ export default function CVTemplate({
         <div style={{ marginBottom: '12px' }}>
           <SectionTitle>Professional Summary</SectionTitle>
           <p style={{ margin: 0, color: '#444', fontSize: '9pt', lineHeight: 1.5 }}>
-            {profile.summary}
+            {mdToReact(profile.summary)}
           </p>
         </div>
       )}
@@ -96,7 +97,7 @@ export default function CVTemplate({
                 {exp.achievements.length > 0 && (
                   <ul style={{ margin: '3px 0 0', paddingLeft: '16px', listStyleType: 'disc' }}>
                     {exp.achievements.map((a, j) => (
-                      <li key={j} style={{ marginBottom: '1px', color: '#444', fontSize: '9pt', lineHeight: 1.4 }}>{a}</li>
+                      <li key={j} style={{ marginBottom: '1px', color: '#444', fontSize: '9pt', lineHeight: 1.4 }}>{mdToReact(a)}</li>
                     ))}
                   </ul>
                 )}
@@ -155,7 +156,7 @@ export default function CVTemplate({
                 {p.url && <span style={{ fontSize: '8pt', color: '#888' }}> — {p.url}</span>}
               </div>
               {p.description && (
-                <div style={{ fontSize: '9pt', color: '#444', marginTop: '1px' }}>{p.description}</div>
+                <div style={{ fontSize: '9pt', color: '#444', marginTop: '1px' }}>{mdToReact(p.description)}</div>
               )}
               {p.highlights.length > 0 && (
                 <ul style={{ margin: '2px 0 0', paddingLeft: '16px', listStyleType: 'disc' }}>

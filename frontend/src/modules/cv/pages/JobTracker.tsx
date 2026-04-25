@@ -19,6 +19,8 @@ import type { CVExperience, CVEducation, CVSkill } from '../types';
 import { supabase } from '../../../lib/supabase';
 import { PageHeader, Card, Badge, EmptyState, ConfirmDialog } from '../../../components/ui';
 import { useToast } from '../../../components/ui/Toast';
+import RichTextEditor from '../components/RichTextEditor';
+import { mdToReact } from '../lib/markdown';
 
 const INTERVIEW_TYPES = ['Phone Screen', 'Video Call', 'Technical', 'Onsite', 'Panel', 'Culture Fit', 'Final Round', 'Other'];
 
@@ -218,9 +220,14 @@ export default function JobTracker() {
       <textarea value={form.job_description || ''} onChange={e => setForm(f => ({ ...f, job_description: e.target.value }))}
         rows={3} placeholder="Paste the full job description here (for AI matching & cover letter)"
         className="neo-input w-full px-3 py-2.5 resize-none" />
-      <textarea value={form.notes || ''} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-        rows={2} placeholder="Personal notes…"
-        className="neo-input w-full px-3 py-2.5 resize-none" />
+      <RichTextEditor
+        mode="paragraph"
+        value={form.notes || ''}
+        onChange={(v) => setForm(f => ({ ...f, notes: v }))}
+        placeholder="Personal notes…"
+        minHeight={64}
+        ariaLabel="Personal notes"
+      />
 
       <div className="flex gap-2">
         <button onClick={() => { isEdit ? setEditingJob(null) : setShowForm(false); setForm(emptyForm); }}
@@ -521,7 +528,7 @@ export default function JobTracker() {
                     {job.notes && (
                       <div>
                         <span className="text-xs font-semibold text-[var(--color-text-secondary)] uppercase tracking-wider">Notes</span>
-                        <p className="text-sm text-[var(--color-text-secondary)] mt-1 whitespace-pre-wrap">{job.notes}</p>
+                        <p className="text-sm text-[var(--color-text-secondary)] mt-1 whitespace-pre-wrap">{mdToReact(job.notes)}</p>
                       </div>
                     )}
 

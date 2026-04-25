@@ -1,4 +1,5 @@
 import type { CVProfile, CVExperience, CVEducation, CVSkill, CVCertification, CVProject, CVLanguage } from '../types';
+import { mdToReact } from '../lib/markdown';
 
 /**
  * Neo template — website-brand inspired.
@@ -98,7 +99,7 @@ export default function CVTemplateNeo({
         {/* ── SUMMARY ─────────────────────── */}
         {profile.summary && (
           <NeoSection title="Summary">
-            <p style={{ margin: 0, color: BODY, fontSize: '9.5pt', lineHeight: 1.6 }}>{profile.summary}</p>
+            <p style={{ margin: 0, color: BODY, fontSize: '9.5pt', lineHeight: 1.6 }}>{mdToReact(profile.summary)}</p>
           </NeoSection>
         )}
 
@@ -125,7 +126,7 @@ export default function CVTemplateNeo({
                   {exp.achievements.length > 0 && (
                     <ul style={{ margin: '5px 0 0', paddingLeft: '16px', listStyleType: 'disc' }}>
                       {exp.achievements.map((a, j) => (
-                        <li key={j} style={{ fontSize: '9.5pt', color: BODY, marginBottom: '2px', lineHeight: 1.5 }}>{a}</li>
+                        <li key={j} style={{ fontSize: '9.5pt', color: BODY, marginBottom: '2px', lineHeight: 1.5 }}>{mdToReact(a)}</li>
                       ))}
                     </ul>
                   )}
@@ -183,7 +184,7 @@ export default function CVTemplateNeo({
                   {p.url && <span style={{ fontWeight: 400, color: BRAND }}> — {p.url}</span>}
                 </div>
                 {p.description && (
-                  <div style={{ fontSize: '9pt', color: BODY, marginTop: '1px' }}>{p.description}</div>
+                  <div style={{ fontSize: '9pt', color: BODY, marginTop: '1px' }}>{mdToReact(p.description)}</div>
                 )}
                 {p.highlights.length > 0 && (
                   <ul style={{ margin: '3px 0 0', paddingLeft: '16px', listStyleType: 'disc' }}>

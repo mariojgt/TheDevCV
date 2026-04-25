@@ -19,6 +19,8 @@ import { toPlainText, downloadPlainText } from '../lib/plainText';
 import PlanBadge from '../../../components/PlanBadge';
 import { recordCVEvent } from '../lib/analytics';
 import CVTemplateClassic from '../components/CVTemplate';
+import RichTextEditor from '../components/RichTextEditor';
+import TagsInput from '../components/TagsInput';
 import CVTemplateModern from '../components/CVTemplateModern';
 import CVTemplateMinimal from '../components/CVTemplateMinimal';
 import CVTemplateProfessional from '../components/CVTemplateProfessional';
@@ -2553,9 +2555,14 @@ export default function CVEditor() {
                     placeholder="Target role (for ATS scoring)"
                     className="px-2 py-1 rounded bg-surface border-2 border-neo-border text-xs w-48" />
                 </div>
-                <textarea value={profile.summary || ''} onChange={e => setProfile(p => ({ ...p, summary: e.target.value }))}
-                  rows={4} placeholder="Write a compelling professional summary…"
-                  className="neo-input w-full px-3 py-2.5 resize-none" />
+                <RichTextEditor
+                  mode="paragraph"
+                  value={profile.summary || ''}
+                  onChange={(v) => setProfile(p => ({ ...p, summary: v }))}
+                  placeholder="Write a compelling professional summary…"
+                  minHeight={96}
+                  ariaLabel="Professional summary"
+                />
                 {/* Quick AI draft — synthesises a 50–80-word summary from the
                     candidate's existing Experience + Skills + target role.
                     Mirrors the Project URL importer's pattern (one-click,
@@ -2660,10 +2667,14 @@ export default function CVEditor() {
                   </div>
                   <div>
                     <label className="text-[10px] uppercase tracking-wider text-muted mb-1 block">Capstone / thesis project</label>
-                    <textarea value={profile.capstone_project || ''}
-                      onChange={e => setProfile(p => ({ ...p, capstone_project: e.target.value || null }))}
-                      rows={2} placeholder="One-sentence summary + measurable outcome"
-                      className="w-full neo-input px-2 py-1.5 text-sm resize-none" />
+                    <RichTextEditor
+                      mode="paragraph"
+                      value={profile.capstone_project || ''}
+                      onChange={(v) => setProfile(p => ({ ...p, capstone_project: v || null }))}
+                      placeholder="One-sentence summary + measurable outcome"
+                      minHeight={56}
+                      ariaLabel="Capstone or thesis project"
+                    />
                   </div>
                 </div>
               )}
@@ -2789,17 +2800,18 @@ export default function CVEditor() {
                           <input type="text" value={exp.end_date || ''} onChange={e => { const n = [...experience]; n[i] = { ...n[i], end_date: e.target.value || null }; setExperience(n); }}
                             placeholder="End (Feb 2024)" className="neo-input px-2 py-1.5 text-sm" />
                         </div>
-                        <textarea
-                          value={(exp.achievements[0] || '')}
-                          onChange={e => {
-                            const v = e.target.value.trim();
+                        <RichTextEditor
+                          mode="paragraph"
+                          value={exp.achievements[0] || ''}
+                          onChange={(v) => {
+                            const trimmed = v.trim();
                             const n = [...experience];
-                            n[i] = { ...n[i], achievements: v ? [v] : [] };
+                            n[i] = { ...n[i], achievements: trimmed ? [trimmed] : [] };
                             setExperience(n);
                           }}
-                          rows={2}
                           placeholder="Optional one-line note (e.g. “Cared for unwell family member; now eagerly approaching return to full-time work.”)"
-                          className="w-full neo-input px-2 py-1.5 text-sm resize-none"
+                          minHeight={56}
+                          ariaLabel="Career-gap note"
                         />
                       </div>
                     ) : (
@@ -2836,9 +2848,14 @@ export default function CVEditor() {
                             </span>
                           </label>
                         )}
-                        <textarea value={exp.achievements.join('\n')} onChange={e => { const n = [...experience]; n[i] = { ...n[i], achievements: e.target.value.split('\n').filter(l => l.trim()) }; setExperience(n); }}
-                          rows={3} placeholder="Achievements (one per line)&#10;- Led team of 5 engineers...&#10;- Increased revenue by 25%..."
-                          className="w-full neo-input px-2 py-1.5 text-sm resize-none" />
+                        <RichTextEditor
+                          mode="list"
+                          value={exp.achievements}
+                          onChange={(v) => { const n = [...experience]; n[i] = { ...n[i], achievements: v }; setExperience(n); }}
+                          placeholder="One achievement per bullet — e.g. Led team of 5 engineers; Increased revenue by 25%"
+                          minHeight={88}
+                          ariaLabel={`Achievements for ${exp.role || 'role'} at ${exp.company || 'company'}`}
+                        />
                         <BulletHealth
                           bullets={exp.achievements}
                           fixingIndex={fixingBullet?.expIndex === i ? fixingBullet.bulletIndex : null}
@@ -2851,9 +2868,12 @@ export default function CVEditor() {
                             <strong>Google X-Y-Z:</strong> "Accomplished <strong>[X]</strong> as measured by <strong>[Y]</strong> by doing <strong>[Z]</strong>." ≥1 number per bullet, max 2 lines (~150 chars). 3–5 bullets per role. <em>Source: Bock/Google, Rezi.</em>
                           </FieldTip>
                         )}
-                        <input type="text" value={exp.technologies.join(', ')} onChange={e => { const n = [...experience]; n[i] = { ...n[i], technologies: e.target.value.split(',').map(t => t.trim()).filter(Boolean) }; setExperience(n); }}
+                        <TagsInput
+                          value={exp.technologies}
+                          onChange={(v) => { const n = [...experience]; n[i] = { ...n[i], technologies: v }; setExperience(n); }}
                           placeholder="Technologies (comma-separated): React, Node.js, PostgreSQL"
-                          className="w-full neo-input px-2 py-1.5 text-sm" />
+                          className="w-full neo-input px-2 py-1.5 text-sm"
+                        />
                       </>
                     )}
                   </EntryCard>
@@ -3081,9 +3101,14 @@ export default function CVEditor() {
                       <input type="text" value={proj.url || ''} onChange={e => { const n = [...projects]; n[i] = { ...n[i], url: e.target.value }; setProjects(n); }}
                         placeholder="URL" className="neo-input px-2 py-1.5 text-sm" />
                     </div>
-                    <textarea value={proj.description || ''} onChange={e => { const n = [...projects]; n[i] = { ...n[i], description: e.target.value }; setProjects(n); }}
-                      rows={2} placeholder="Description"
-                      className="w-full neo-input px-2 py-1.5 text-sm resize-none" />
+                    <RichTextEditor
+                      mode="paragraph"
+                      value={proj.description || ''}
+                      onChange={(v) => { const n = [...projects]; n[i] = { ...n[i], description: v }; setProjects(n); }}
+                      placeholder="Description"
+                      minHeight={64}
+                      ariaLabel={`Description for ${proj.name || 'project'}`}
+                    />
                     {/* Beautify — AI restructures this description for clarity + impact.
                         Plain-text output with natural paragraph breaks; the portfolio
                         renderer turns `\n\n` into real <p> blocks. */}
@@ -3111,7 +3136,9 @@ export default function CVEditor() {
                         )}
                       </button>
                     </div>
-                    <input type="text" value={proj.technologies.join(', ')} onChange={e => { const n = [...projects]; n[i] = { ...n[i], technologies: e.target.value.split(',').map(t => t.trim()).filter(Boolean) }; setProjects(n); }}
+                    <TagsInput
+                      value={proj.technologies}
+                      onChange={(v) => { const n = [...projects]; n[i] = { ...n[i], technologies: v }; setProjects(n); }}
                       placeholder="Technologies (comma-separated)"
                       className="w-full neo-input px-2 py-1.5 text-sm" />
                   </EntryCard>

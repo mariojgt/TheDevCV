@@ -1,4 +1,5 @@
 import type { CVProfile, CVExperience, CVEducation, CVSkill, CVCertification, CVProject, CVLanguage } from '../types';
+import { mdToReact } from '../lib/markdown';
 
 /**
  * Minimal CV template — ultra-clean, lots of whitespace, elegant typography.
@@ -59,7 +60,7 @@ export default function CVTemplateMinimal({
       {/* Summary */}
       {profile.summary && (
         <div style={{ marginBottom: '24px' }}>
-          <p style={{ margin: 0, color: '#444', fontStyle: 'italic', fontSize: '9.5pt', lineHeight: 1.6 }}>{profile.summary}</p>
+          <p style={{ margin: 0, color: '#444', fontStyle: 'italic', fontSize: '9.5pt', lineHeight: 1.6 }}>{mdToReact(profile.summary)}</p>
         </div>
       )}
 
@@ -80,7 +81,7 @@ export default function CVTemplateMinimal({
                 {exp.achievements.length > 0 && (
                   <ul style={{ margin: '4px 0 0', paddingLeft: '16px' }}>
                     {exp.achievements.map((a, j) => (
-                      <li key={j} style={{ fontSize: '9pt', color: '#444', marginBottom: '1px' }}>{a}</li>
+                      <li key={j} style={{ fontSize: '9pt', color: '#444', marginBottom: '1px' }}>{mdToReact(a)}</li>
                     ))}
                   </ul>
                 )}
@@ -127,7 +128,7 @@ export default function CVTemplateMinimal({
             <div key={p.id || i} style={{ marginBottom: '6px' }}>
               <span style={{ fontWeight: 700 }}>{p.name}</span>
               {p.url && <span style={{ fontSize: '8pt', color: '#999' }}> — {p.url}</span>}
-              {p.description && <div style={{ fontSize: '9pt', color: '#555' }}>{p.description}</div>}
+              {p.description && <div style={{ fontSize: '9pt', color: '#555' }}>{mdToReact(p.description)}</div>}
             </div>
           ))}
         </div>

@@ -3,6 +3,7 @@ import type {
   CVProfile, CVExperience, CVEducation, CVSkill,
   CVCertification, CVProject, CVLanguage,
 } from '../types';
+import { mdSegments } from './markdown';
 
 /**
  * ATS-safe PDF generator.
@@ -147,6 +148,104 @@ function writeLines(ctx: Ctx, lines: string[], x: number, lineHeight: number) {
     ctx.doc.text(line, x, ctx.y);
     ctx.y += lineHeight;
   }
+}
+
+// jsPDF can't render mixed inline runs natively — splitTextToSize ignores font
+// changes. We tokenise the inline-markdown segments into styled words, do our
+// own word-wrap by measuring, then emit per-word doc.text calls. Links route
+// through textWithLink so they remain clickable.
+type RichWord = {
+  text: string;
+  weight: 'normal' | 'bold' | 'italic' | 'bolditalic';
+  url?: string;
+  color?: RGB;
+  width: number;
+};
+
+function combineWeight(
+  base: 'normal' | 'bold' | 'italic' | 'bolditalic',
+  bold?: boolean,
+  italic?: boolean,
+): 'normal' | 'bold' | 'italic' | 'bolditalic' {
+  const isBold = bold || base === 'bold' || base === 'bolditalic';
+  const isItalic = italic || base === 'italic' || base === 'bolditalic';
+  if (isBold && isItalic) return 'bolditalic';
+  if (isBold) return 'bold';
+  if (isItalic) return 'italic';
+  return 'normal';
+}
+
+function buildRichWords(
+  ctx: Ctx,
+  text: string,
+  baseSize: number,
+  baseWeight: 'normal' | 'bold' | 'italic' | 'bolditalic',
+  bodyColor: RGB,
+): RichWord[] {
+  const segs = mdSegments(text);
+  const words: RichWord[] = [];
+  for (const seg of segs) {
+    if (!seg.text) continue;
+    const weight = combineWeight(baseWeight, seg.bold, seg.italic);
+    const color = seg.url ? ctx.style.accent : bodyColor;
+    // Preserve internal whitespace as its own token so spacing survives wrap.
+    const parts = seg.text.split(/(\s+)/);
+    for (const part of parts) {
+      if (!part) continue;
+      setFont(ctx, weight, baseSize);
+      const width = ctx.doc.getTextWidth(part);
+      words.push({ text: part, weight, url: seg.url, color, width });
+    }
+  }
+  return words;
+}
+
+function writeRich(
+  ctx: Ctx,
+  text: string,
+  x: number,
+  maxWidth: number,
+  lineHeight: number,
+  baseSize: number,
+  baseWeight: 'normal' | 'bold' | 'italic' | 'bolditalic',
+  bodyColor: RGB,
+): number {
+  const words = buildRichWords(ctx, text, baseSize, baseWeight, bodyColor);
+  if (words.length === 0) return 0;
+  let lineCount = 0;
+  let line: RichWord[] = [];
+  let lineWidth = 0;
+  const flush = () => {
+    if (line.length === 0) return;
+    ensureSpace(ctx, lineHeight);
+    let cx = x;
+    for (const w of line) {
+      setFont(ctx, w.weight, baseSize);
+      if (w.color) setColor(ctx, w.color);
+      if (w.url && w.text.trim()) {
+        ctx.doc.textWithLink(w.text, cx, ctx.y, { url: w.url });
+      } else {
+        ctx.doc.text(w.text, cx, ctx.y);
+      }
+      cx += w.width;
+    }
+    ctx.y += lineHeight;
+    lineCount += 1;
+    line = [];
+    lineWidth = 0;
+  };
+  for (const w of words) {
+    const isWhitespace = !w.text.trim();
+    if (line.length === 0 && isWhitespace) continue; // drop leading whitespace
+    if (lineWidth + w.width > maxWidth && line.length > 0) {
+      flush();
+      if (isWhitespace) continue;
+    }
+    line.push(w);
+    lineWidth += w.width;
+  }
+  flush();
+  return lineCount;
 }
 
 // ── Header (name, contact line) ───────────────────────────────────
@@ -316,12 +415,24 @@ function toTitleCase(s: string): string {
 
 // ── Summary paragraph ─────────────────────────────────────────────
 function renderSummary(ctx: Ctx, data: CVData) {
-  if (!data.profile.summary?.trim()) return;
+  const raw = data.profile.summary?.trim();
+  if (!raw) return;
   renderHeading(ctx, 'Professional Summary');
-  setFont(ctx, ctx.style.summaryItalic ? 'italic' : 'normal', 9);
-  setColor(ctx, ctx.bodyRgb);
-  const lines = ctx.doc.splitTextToSize(data.profile.summary.trim(), ctx.cw);
-  writeLines(ctx, lines, ctx.ml, 4);
+  // Honour paragraph breaks (\n\n) — each paragraph wraps independently.
+  const paragraphs = raw.split(/\n{2,}/);
+  for (let i = 0; i < paragraphs.length; i++) {
+    writeRich(
+      ctx,
+      paragraphs[i],
+      ctx.ml,
+      ctx.cw,
+      4,
+      9,
+      ctx.style.summaryItalic ? 'italic' : 'normal',
+      ctx.bodyRgb,
+    );
+    if (i < paragraphs.length - 1) ctx.y += 1.5;
+  }
   ctx.y += 1;
 }
 
@@ -362,15 +473,19 @@ function renderExperience(ctx: Ctx, data: CVData) {
       ctx.y += 4;
     }
 
-    // Achievement bullets — plain disc, indent 4mm.
+    // Achievement bullets — plain disc, indent 4mm. Inline markdown
+    // (bold/italic/links) is honoured via writeRich; plain text passes through
+    // unchanged.
     for (const ach of exp.achievements) {
-      const bulletLines = ctx.doc.splitTextToSize(ach, ctx.cw - 4);
-      ensureSpace(ctx, bulletLines.length * 3.6 + 1);
+      // Reserve at least one line of vertical space before drawing the disc
+      // so a wrap doesn't push the bullet onto a different page than its body.
+      ensureSpace(ctx, 4.2);
+      const bulletY = ctx.y;
       setFont(ctx, 'normal', 9);
       setColor(ctx, ctx.bodyRgb);
-      ctx.doc.text('•', ctx.ml, ctx.y);
-      ctx.doc.text(bulletLines, ctx.ml + 4, ctx.y);
-      ctx.y += bulletLines.length * 3.6 + 0.6;
+      ctx.doc.text('•', ctx.ml, bulletY);
+      writeRich(ctx, ach, ctx.ml + 4, ctx.cw - 4, 3.6, 9, 'normal', ctx.bodyRgb);
+      ctx.y += 0.6;
     }
 
     // Tech stack on its own line, labelled.
@@ -489,10 +604,11 @@ function renderProjects(ctx: Ctx, data: CVData) {
     ctx.y += 4;
 
     if (p.description) {
-      setFont(ctx, 'normal', 9);
-      setColor(ctx, ctx.bodyRgb);
-      const lines = ctx.doc.splitTextToSize(p.description, ctx.cw);
-      writeLines(ctx, lines, ctx.ml, 3.6);
+      const paragraphs = p.description.split(/\n{2,}/);
+      for (let pi = 0; pi < paragraphs.length; pi++) {
+        writeRich(ctx, paragraphs[pi], ctx.ml, ctx.cw, 3.6, 9, 'normal', ctx.bodyRgb);
+        if (pi < paragraphs.length - 1) ctx.y += 1.2;
+      }
     }
     for (const h of p.highlights || []) {
       const bl = ctx.doc.splitTextToSize(h, ctx.cw - 4);
