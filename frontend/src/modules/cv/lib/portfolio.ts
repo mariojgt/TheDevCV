@@ -42,6 +42,9 @@ export interface PortfolioGithubDecoration {
   stars?: number;
   language?: string;
   topics?: string[];
+  /** SPDX id (e.g. "MIT") or full license name. Surfaced as a small chip on
+   *  open-source project cards when GitHub enhancement is enabled. */
+  license?: string;
 }
 
 export type PortfolioDecorations = Record<string, PortfolioGithubDecoration>;
@@ -65,9 +68,17 @@ export async function fetchGithubDecorations(
   projects: CVProject[],
 ): Promise<PortfolioDecorations> {
   const result: PortfolioDecorations = {};
+  // Prefer repo_url for open-source projects (canonical source link), fall
+  // back to the live `url` so any project pointing at a github.com repo gets
+  // decorated regardless of OSS flag. Decorations are keyed by the URL we
+  // actually fetched so renderProjects can do the same lookup.
   const targets = projects
-    .map(p => ({ url: p.url, repo: parseGitHubRepoUrl(p.url || '') }))
-    .filter((x): x is { url: string; repo: { owner: string; repo: string } } => !!x.url && !!x.repo);
+    .map(p => {
+      const candidate = (p.is_open_source && p.repo_url) ? p.repo_url : (p.url || '');
+      const repo = parseGitHubRepoUrl(candidate);
+      return repo && candidate ? { url: candidate, repo } : null;
+    })
+    .filter((x): x is { url: string; repo: { owner: string; repo: string } } => !!x);
 
   await Promise.all(targets.map(async ({ url, repo }) => {
     try {
@@ -75,11 +86,17 @@ export async function fetchGithubDecorations(
         headers: { Accept: 'application/vnd.github+json' },
       });
       if (!r.ok) return;
-      const meta = await r.json() as { stargazers_count?: number; language?: string | null; topics?: string[] };
+      const meta = await r.json() as {
+        stargazers_count?: number;
+        language?: string | null;
+        topics?: string[];
+        license?: { spdx_id?: string | null; name?: string | null } | null;
+      };
       result[url] = {
         stars: meta.stargazers_count,
         language: meta.language ?? undefined,
         topics: meta.topics,
+        license: meta.license?.spdx_id || meta.license?.name || undefined,
       };
     } catch { /* ignore */ }
   }));
@@ -202,23 +219,48 @@ function renderHero({ profile, config }: RenderCtx): string {
 function renderProjects({ projects, decorations }: RenderCtx): string {
   if (!projects.length) return '';
   const cards = projects.map(p => {
-    const dec = p.url ? decorations[p.url] : undefined;
+    // Decorations are keyed by whichever URL we used to fetch — repo_url for
+    // OSS projects, otherwise live `url`. Mirror the same priority here.
+    const decKey = (p.is_open_source && p.repo_url) ? p.repo_url : (p.url || '');
+    const dec = decKey ? decorations[decKey] : undefined;
     const tech = (p.technologies || []).slice(0, 8);
     const highlights = (p.highlights || []).filter(Boolean).slice(0, 3);
+    // Portfolio-specific description override falls back to the shared one.
+    const desc = p.portfolio_description || p.description;
+    const imageUrl = (p.image_url || '').trim();
+
     const metaBits: string[] = [];
+    if (p.is_open_source)     metaBits.push(`<span class="meta-oss" aria-label="Open source project">OPEN SOURCE</span>`);
     if (dec?.stars != null)   metaBits.push(`<span class="meta-star">★ ${dec.stars.toLocaleString()}</span>`);
     if (dec?.language)        metaBits.push(`<span class="meta-lang">${esc(dec.language)}</span>`);
+    if (dec?.license)         metaBits.push(`<span class="meta-license">${esc(dec.license)}</span>`);
+
+    const ctas: string[] = [];
+    if (p.url) {
+      ctas.push(`<a class="card-cta" href="${escUrl(p.url)}" rel="noopener" target="_blank">Open &rarr;</a>`);
+    }
+    if (p.is_open_source && p.repo_url && p.repo_url !== p.url) {
+      ctas.push(`<a class="card-cta card-cta-ghost" href="${escUrl(p.repo_url)}" rel="noopener" target="_blank">Source &rarr;</a>`);
+    }
+
+    // Cover image — sits above the header so it acts as a visual lead. Lazy-
+    // loaded so a portfolio with 12 cards doesn't fire 12 simultaneous fetches
+    // on first paint. alt text falls back to the project name for a11y.
+    const imageBlock = imageUrl
+      ? `<a class="card-img-wrap" href="${escUrl(p.url || imageUrl)}" rel="noopener" target="_blank" aria-label="${esc(p.name || 'Open project')}"><img class="card-img" src="${escUrl(imageUrl)}" alt="${esc(p.name || 'Project cover')}" loading="lazy"></a>`
+      : '';
 
     return `
-    <article class="card">
+    <article class="card${imageUrl ? ' card-with-img' : ''}">
+      ${imageBlock}
       <header class="card-h">
         <h3>${esc(p.name || 'Untitled project')}</h3>
         ${metaBits.length ? `<div class="card-meta">${metaBits.join('')}</div>` : ''}
       </header>
-      ${p.description ? `<div class="card-desc">${nl2html(p.description)}</div>` : ''}
+      ${desc ? `<div class="card-desc">${nl2html(desc)}</div>` : ''}
       ${highlights.length ? `<ul class="card-list">${highlights.map(h => `<li>${esc(h)}</li>`).join('')}</ul>` : ''}
       ${tech.length ? `<div class="chips">${tech.map(t => `<span class="chip">${esc(t)}</span>`).join('')}</div>` : ''}
-      ${p.url ? `<a class="card-cta" href="${escUrl(p.url)}" rel="noopener" target="_blank">Open &rarr;</a>` : ''}
+      ${ctas.length ? `<div class="card-ctas">${ctas.join('')}</div>` : ''}
     </article>`;
   }).join('');
 
@@ -361,24 +403,54 @@ h2 { margin: 0 0 16px; font-size: clamp(16px, 2.2vw, 20px); color: var(--accent)
   display: flex; flex-direction: column; gap: 10px;
 }
 .card:hover { transform: translate(-2px,-2px); box-shadow: 8px 8px 0 0 var(--accent); }
+.card-with-img { padding: 0; }
+.card-with-img .card-h, .card-with-img .card-desc, .card-with-img .card-list,
+.card-with-img .chips, .card-with-img .card-ctas { padding-left: 18px; padding-right: 18px; }
+.card-with-img .card-h { padding-top: 14px; }
+.card-with-img .card-ctas { padding-bottom: 18px; }
+.card-img-wrap {
+  display: block; margin: 0; line-height: 0;
+  border-bottom: 3px solid var(--border);
+  background: var(--bg);
+  overflow: hidden;
+}
+.card-img {
+  display: block; width: 100%; height: auto;
+  aspect-ratio: 16 / 9; object-fit: cover;
+  transition: transform .25s ease;
+}
+.card-img-wrap:hover .card-img { transform: scale(1.03); }
 .card-h { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
 .card h3 { margin: 0; font-size: 18px; text-transform: uppercase; letter-spacing: .5px; }
-.card-meta { display: flex; gap: 8px; font-size: 11px; color: var(--muted); white-space: nowrap; }
+.card-meta { display: flex; gap: 6px; font-size: 11px; color: var(--muted); flex-wrap: wrap; align-items: center; }
 .meta-star { color: var(--accent2); font-weight: 700; }
 .meta-lang { color: var(--accent); font-weight: 700; }
+.meta-oss {
+  background: var(--accent); color: var(--bg);
+  padding: 2px 7px; font-weight: 800; font-size: 10px;
+  letter-spacing: 1.5px; border: 2px solid var(--accent);
+  text-transform: uppercase; box-shadow: 2px 2px 0 0 var(--border);
+}
+.meta-license {
+  padding: 2px 6px; border: 2px solid var(--border); background: var(--surface2);
+  font-weight: 700; font-size: 10px; letter-spacing: .5px; color: var(--muted);
+  text-transform: uppercase;
+}
 .card-desc { margin: 0; font-size: 14px; color: var(--muted); }
 .card-desc p { margin: 0 0 8px; }
 .card-desc p:last-child { margin-bottom: 0; }
 .card-list { margin: 0; padding-left: 18px; font-size: 13px; color: var(--text); }
 .card-list li { margin: 4px 0; }
+.card-ctas { display: flex; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
 .card-cta {
-  align-self: flex-start; margin-top: 4px;
   padding: 6px 10px; border: 2px solid var(--accent); background: transparent;
   color: var(--accent); font-weight: 700; font-size: 12px;
   text-transform: uppercase; letter-spacing: 1px;
   box-shadow: 3px 3px 0 0 var(--border);
 }
 .card-cta:hover { background: var(--accent); color: var(--bg); text-decoration: none; }
+.card-cta-ghost { color: var(--muted); border-color: var(--border); }
+.card-cta-ghost:hover { background: transparent; color: var(--accent); border-color: var(--accent); }
 
 /* ── Chips ── */
 .chips { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -437,7 +509,242 @@ footer a { color: var(--accent); }
 `;
 }
 
+// ─── OG image (Canvas → data URL) ─────────────────────────────────────────
+
+/**
+ * Render a 1200×630 Open Graph share card to a `data:image/png;base64,…`
+ * URL. Returned URL is small enough (~80–150 KB for typical text-only
+ * cards) to embed inline in `<meta property="og:image">`, which all
+ * modern social scrapers (Slack, Discord, LinkedIn, Twitter, Bluesky)
+ * follow as of 2026.
+ *
+ * Pure browser API (HTMLCanvasElement), no external assets, so the
+ * generated image survives offline and air-gapped deploys. Returns
+ * `null` outside a browser context (SSR / tests) so callers can skip
+ * the og:image tag without crashing.
+ *
+ * Visual design mirrors the neo-brutalist portfolio template — same
+ * dark navy, accent ribbon, 6px border, uppercase display name — so a
+ * link preview "looks like" the destination page.
+ */
+export function generateOgImage(
+  profile: Partial<CVProfile>,
+  config: PortfolioConfig,
+): string | null {
+  if (typeof document === 'undefined') return null;
+  const canvas = document.createElement('canvas');
+  canvas.width = 1200;
+  canvas.height = 630;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  const accent = /^#[0-9a-f]{3,8}$/i.test(config.accentColor) ? config.accentColor : '#0d9668';
+  const FONT_STACK = '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif';
+
+  // Background
+  ctx.fillStyle = '#080d19';
+  ctx.fillRect(0, 0, 1200, 630);
+
+  // Top + bottom accent ribbons
+  ctx.fillStyle = accent;
+  ctx.fillRect(0, 0, 1200, 12);
+  ctx.fillRect(0, 618, 1200, 12);
+
+  // 6px outer border (neo-brutalist)
+  ctx.strokeStyle = '#3a506e';
+  ctx.lineWidth = 6;
+  ctx.strokeRect(3, 3, 1194, 624);
+
+  // "PORTFOLIO" tag pill (top-left)
+  ctx.fillStyle = '#0c1222';
+  ctx.fillRect(72, 72, 200, 50);
+  ctx.lineWidth = 4;
+  ctx.strokeRect(72, 72, 200, 50);
+  // Drop shadow for the pill
+  ctx.fillStyle = '#3a506e';
+  ctx.fillRect(76, 124, 200, 4);
+  // Pill text
+  ctx.fillStyle = accent;
+  ctx.font = `800 18px ${FONT_STACK}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('PORTFOLIO', 90, 97);
+
+  // Name — auto-shrinks if too wide
+  const name = (profile.full_name || 'Your Name').toUpperCase();
+  const maxNameWidth = 980;
+  let nameSize = 88;
+  ctx.font = `900 ${nameSize}px ${FONT_STACK}`;
+  while (ctx.measureText(name).width > maxNameWidth && nameSize > 40) {
+    nameSize -= 4;
+    ctx.font = `900 ${nameSize}px ${FONT_STACK}`;
+  }
+  ctx.fillStyle = '#e6ecf6';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  ctx.fillText(name, 72, 180, maxNameWidth);
+
+  // Role
+  const role = (profile.target_role || profile.job_title || '').trim().toUpperCase();
+  let yCursor = 180 + nameSize + 16;
+  if (role) {
+    ctx.fillStyle = accent;
+    ctx.font = `800 30px ${FONT_STACK}`;
+    ctx.fillText(role, 72, yCursor, maxNameWidth);
+    yCursor += 50;
+  }
+
+  // Tagline (word-wrap, max ~3 lines)
+  const tagline = mdToPlain(config.taglineOverride?.trim() || profile.summary || '').trim();
+  if (tagline) {
+    ctx.fillStyle = '#8aa0bf';
+    ctx.font = `400 22px ${FONT_STACK}`;
+    const words = tagline.split(/\s+/);
+    const maxLineWidth = 980;
+    let line = '';
+    let linesDrawn = 0;
+    const maxLines = 3;
+    for (const w of words) {
+      const test = line ? line + ' ' + w : w;
+      if (ctx.measureText(test).width > maxLineWidth) {
+        ctx.fillText(line, 72, yCursor);
+        yCursor += 30;
+        linesDrawn += 1;
+        line = w;
+        if (linesDrawn >= maxLines - 1) break;
+      } else {
+        line = test;
+      }
+    }
+    if (line && linesDrawn < maxLines) ctx.fillText(line, 72, yCursor);
+  }
+
+  // Initials monogram (bottom-right)
+  const initials = initialsOf(profile.full_name || '');
+  ctx.fillStyle = '#0c1222';
+  ctx.fillRect(1040, 460, 90, 90);
+  ctx.lineWidth = 4;
+  ctx.strokeStyle = '#3a506e';
+  ctx.strokeRect(1040, 460, 90, 90);
+  ctx.fillStyle = accent;
+  ctx.font = `900 38px ${FONT_STACK}`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(initials, 1085, 505);
+
+  // Footer mark
+  ctx.fillStyle = '#3a506e';
+  ctx.font = `400 13px ${FONT_STACK}`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('cv.thedevrealm.com', 72, 580);
+
+  return canvas.toDataURL('image/png');
+}
+
+// ─── SEO + Open Graph + JSON-LD ───────────────────────────────────────────
+
+/** Inline-script-safe JSON. Replaces `</` so a stray closing-tag-looking
+ *  substring inside a string value can't break out of `<script>` context. */
+function jsonForScript(obj: unknown): string {
+  return JSON.stringify(obj).replace(/</g, '\\u003C');
+}
+
+/**
+ * Build the full `<head>` metadata block: title, description, Open Graph,
+ * Twitter card, canonical link, and a `Person`-typed JSON-LD blob for
+ * rich-result eligibility on Google. Tags are emitted only when their
+ * inputs are present so the output stays minimal.
+ *
+ * `deployUrl` (when provided) populates `og:url` + `<link rel="canonical">`.
+ * `ogImage` (when provided) is a data: URL or absolute URL pointing at
+ * the share card.
+ */
+export function generateMetaTags(
+  profile: Partial<CVProfile>,
+  config: PortfolioConfig,
+  opts: { deployUrl?: string; ogImage?: string | null } = {},
+): string {
+  const fullName = (profile.full_name || '').trim();
+  const role     = (profile.target_role || profile.job_title || '').trim();
+  const title    = role
+    ? `${fullName || 'Portfolio'} — ${role}`
+    : (fullName ? `${fullName} — Portfolio` : 'Portfolio');
+  const desc     = mdToPlain(config.taglineOverride?.trim() || profile.summary || '').slice(0, 160).trim()
+    || (fullName ? `Portfolio of ${fullName}` : 'Personal portfolio');
+  const url      = opts.deployUrl?.trim() ? opts.deployUrl.trim().replace(/\/+$/, '') : '';
+  const ogImage  = opts.ogImage || '';
+
+  const tags: string[] = [
+    `<title>${esc(title)}</title>`,
+    `<meta name="description" content="${esc(desc)}">`,
+    `<meta property="og:type" content="profile">`,
+    `<meta property="og:title" content="${esc(title)}">`,
+    `<meta property="og:description" content="${esc(desc)}">`,
+    `<meta property="og:site_name" content="${esc(fullName || 'Portfolio')}">`,
+  ];
+
+  // profile:first_name / profile:last_name when we can split safely
+  if (fullName) {
+    const parts = fullName.split(/\s+/).filter(Boolean);
+    if (parts.length >= 2) {
+      tags.push(`<meta property="profile:first_name" content="${esc(parts[0])}">`);
+      tags.push(`<meta property="profile:last_name" content="${esc(parts.slice(1).join(' '))}">`);
+    }
+  }
+
+  if (url) {
+    tags.push(`<meta property="og:url" content="${esc(url)}">`);
+    tags.push(`<link rel="canonical" href="${esc(url)}">`);
+  }
+  if (ogImage) {
+    tags.push(`<meta property="og:image" content="${ogImage}">`);
+    tags.push(`<meta property="og:image:width" content="1200">`);
+    tags.push(`<meta property="og:image:height" content="630">`);
+    tags.push(`<meta property="og:image:alt" content="${esc(title)}">`);
+  }
+
+  // Twitter card
+  tags.push(`<meta name="twitter:card" content="${ogImage ? 'summary_large_image' : 'summary'}">`);
+  tags.push(`<meta name="twitter:title" content="${esc(title)}">`);
+  tags.push(`<meta name="twitter:description" content="${esc(desc)}">`);
+  if (ogImage) tags.push(`<meta name="twitter:image" content="${ogImage}">`);
+
+  // Robots — explicit allow so corp-firewalled previews don't see ambiguity
+  tags.push(`<meta name="robots" content="index, follow">`);
+  tags.push(`<meta name="generator" content="TheDevCV Portfolio Builder">`);
+
+  // JSON-LD Person (helps Google render rich knowledge-panel-style results
+  // for personal-name searches; ~300 bytes, harmless when ignored)
+  const sameAs = [profile.github, profile.linkedin, profile.website].filter(Boolean) as string[];
+  const ld: Record<string, unknown> = {
+    '@context': 'https://schema.org',
+    '@type': 'Person',
+  };
+  if (fullName)        ld.name = fullName;
+  if (role)            ld.jobTitle = role;
+  if (desc)            ld.description = desc;
+  if (url)             ld.url = url;
+  if (ogImage)         ld.image = ogImage;
+  if (profile.email)   ld.email = `mailto:${profile.email}`;
+  if (sameAs.length)   ld.sameAs = sameAs;
+  if (profile.location) ld.address = profile.location;
+  tags.push(`<script type="application/ld+json">${jsonForScript(ld)}</script>`);
+
+  return tags.join('\n');
+}
+
 // ─── Main template ────────────────────────────────────────────────────────
+
+export interface GeneratePortfolioOptions {
+  /** Where the portfolio will be hosted. When set, populates `og:url` and
+   *  `<link rel="canonical">`. Optional — omitting these tags is still
+   *  SEO-valid; Google derives canonical from the live URL. */
+  deployUrl?: string;
+  /** Pre-computed OG image as a data: URL or absolute URL. Skipped when
+   *  null/undefined; Twitter card downgrades to `summary` automatically. */
+  ogImage?: string | null;
+}
 
 /**
  * Produce a single complete HTML document. Self-contained (inline CSS, no JS,
@@ -452,12 +759,9 @@ export function generatePortfolioHtml(
   skills: CVSkill[],
   config: PortfolioConfig,
   decorations: PortfolioDecorations = {},
+  opts: GeneratePortfolioOptions = {},
 ): string {
   const ctx: RenderCtx = { profile, experience, projects, skills, config, decorations };
-  const title = esc(`${profile.full_name || 'Portfolio'} — ${profile.target_role || profile.job_title || 'Portfolio'}`);
-  const desc = esc(
-    mdToPlain(config.taglineOverride?.trim() || profile.summary || '').slice(0, 160),
-  );
 
   const body: string[] = [];
   if (config.sections.hero)       body.push(renderHero(ctx));
@@ -467,6 +771,7 @@ export function generatePortfolioHtml(
   if (config.sections.contact)    body.push(renderContact(ctx));
 
   const css = renderCss(config.accentColor);
+  const head = generateMetaTags(profile, config, opts);
   const deployComment = `
 <!--
   ════════════════════════════════════════════════════════════════
@@ -490,9 +795,7 @@ export function generatePortfolioHtml(
 <head>${deployComment}
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${title}</title>
-${desc ? `<meta name="description" content="${desc}">` : ''}
-<meta name="generator" content="TheDevCV Portfolio Builder">
+${head}
 <style>${css}</style>
 </head>
 <body>

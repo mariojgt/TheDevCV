@@ -549,10 +549,12 @@ function renderEducation(ctx: Ctx, data: CVData) {
   }
 }
 
-// ── Skills (single column, grouped by category) ───────────────────
+// ── Areas of Experience (formerly "Skills" — relocated above Summary
+//    in the call sequence so the recruiter's first scan after the name
+//    block is the candidate's domains rather than a marketing summary).
 function renderSkills(ctx: Ctx, data: CVData) {
   if (!data.skills.length) return;
-  renderHeading(ctx, 'Skills');
+  renderHeading(ctx, 'Areas of Experience');
 
   const grouped = data.skills.reduce((acc, s) => {
     const k = s.category || 'Other';
@@ -603,8 +605,10 @@ function renderProjects(ctx: Ctx, data: CVData) {
     }
     ctx.y += 4;
 
-    if (p.description) {
-      const paragraphs = p.description.split(/\n{2,}/);
+    // CV-specific description override falls back to the shared description.
+    const projDesc = p.cv_description || p.description;
+    if (projDesc) {
+      const paragraphs = projDesc.split(/\n{2,}/);
       for (let pi = 0; pi < paragraphs.length; pi++) {
         writeRich(ctx, paragraphs[pi], ctx.ml, ctx.cw, 3.6, 9, 'normal', ctx.bodyRgb);
         if (pi < paragraphs.length - 1) ctx.y += 1.2;
@@ -704,6 +708,8 @@ function renderATSPdf(data: CVData, style: PDFStyle) {
   };
 
   renderHeader(ctx, data);
+  // Areas of Experience leads — recruiters get domain signal before prose.
+  renderSkills(ctx, data);
   renderSummary(ctx, data);
   // Entry-level: lead with Education to highlight academic background + capstone
   // before limited work history (resume-builder skill guidance).
@@ -715,7 +721,6 @@ function renderATSPdf(data: CVData, style: PDFStyle) {
     renderExperience(ctx, data);
     renderEducation(ctx, data);
   }
-  renderSkills(ctx, data);
   renderProjects(ctx, data);
   renderCertifications(ctx, data);
   renderLanguages(ctx, data);

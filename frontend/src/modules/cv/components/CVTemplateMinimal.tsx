@@ -57,6 +57,19 @@ export default function CVTemplateMinimal({
       {/* Thin rule */}
       <hr style={{ border: 'none', borderTop: '0.5px solid #ccc', margin: '0 0 20px' }} />
 
+      {/* Areas of Experience (relocated above Summary) */}
+      {skills.length > 0 && (
+        <div style={{ marginBottom: '20px' }}>
+          <MinimalHeading>Areas of Experience</MinimalHeading>
+          {Object.entries(groupedSkills).map(([cat, items]) => (
+            <div key={cat} style={{ marginBottom: '3px', fontSize: '9.5pt' }}>
+              <span style={{ fontWeight: 700 }}>{cat}:</span>{' '}
+              <span style={{ color: '#555' }}>{items.map(s => s.name).join(', ')}</span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Summary */}
       {profile.summary && (
         <div style={{ marginBottom: '24px' }}>
@@ -107,19 +120,6 @@ export default function CVTemplateMinimal({
         return eduFirst ? <>{eduBlock}{expBlock}</> : <>{expBlock}{eduBlock}</>;
       })()}
 
-      {/* Skills */}
-      {skills.length > 0 && (
-        <div style={{ marginBottom: '20px' }}>
-          <MinimalHeading>Skills</MinimalHeading>
-          {Object.entries(groupedSkills).map(([cat, items]) => (
-            <div key={cat} style={{ marginBottom: '3px', fontSize: '9.5pt' }}>
-              <span style={{ fontWeight: 700 }}>{cat}:</span>{' '}
-              <span style={{ color: '#555' }}>{items.map(s => s.name).join(', ')}</span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Projects */}
       {projects.length > 0 && (
         <div style={{ marginBottom: '20px' }}>
@@ -128,7 +128,7 @@ export default function CVTemplateMinimal({
             <div key={p.id || i} style={{ marginBottom: '6px' }}>
               <span style={{ fontWeight: 700 }}>{p.name}</span>
               {p.url && <span style={{ fontSize: '8pt', color: '#999' }}> — {p.url}</span>}
-              {p.description && <div style={{ fontSize: '9pt', color: '#555' }}>{mdToReact(p.description)}</div>}
+              {(p.cv_description || p.description) && <div style={{ fontSize: '9pt', color: '#555' }}>{mdToReact(p.cv_description || p.description || '')}</div>}
             </div>
           ))}
         </div>

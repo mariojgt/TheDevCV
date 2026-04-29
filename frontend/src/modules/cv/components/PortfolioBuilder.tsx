@@ -6,6 +6,7 @@ import { supabase } from '../../../lib/supabase';
 import type { CVProfile, CVExperience, CVProject, CVSkill } from '../types';
 import {
   generatePortfolioHtml,
+  generateOgImage,
   fetchGithubDecorations,
   downloadPortfolioHtml,
   slugifyName,
@@ -41,12 +42,41 @@ export default function PortfolioBuilder({
   const [loadingGithub, setLoadingGithub] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [exportedAt, setExportedAt] = useState<number | null>(null);
+  /** Where the user plans to host the portfolio (e.g. https://user.github.io).
+   *  Optional — when filled, populates og:url + canonical for share-link
+   *  previews; when empty those tags are omitted (still SEO-valid). */
+  const [deployUrl, setDeployUrl] = useState('');
+  /** Pre-rendered OG share card as a data: URL. Regenerated on a debounce
+   *  whenever name/role/tagline/accent change so we don't burn cycles on
+   *  every keystroke in unrelated fields. */
+  const [ogImage, setOgImage] = useState<string | null>(null);
+
+  // Debounced OG image regen — only the fields the canvas actually reads.
+  // 600ms is long enough to avoid mid-typing thrash but short enough that
+  // a paste-then-export flow gets the up-to-date image.
+  useEffect(() => {
+    const t = setTimeout(() => {
+      try {
+        setOgImage(generateOgImage(profile, config));
+      } catch {
+        setOgImage(null);
+      }
+    }, 600);
+    return () => clearTimeout(t);
+  }, [
+    profile.full_name,
+    profile.target_role,
+    profile.job_title,
+    profile.summary,
+    config.taglineOverride,
+    config.accentColor,
+  ]);
 
   // Live HTML regenerates on every config / content change. Computation is
   // fast enough (a few KB of template output) that we don't need debouncing.
   const html = useMemo(
-    () => generatePortfolioHtml(profile, experience, projects, skills, config, decorations),
-    [profile, experience, projects, skills, config, decorations],
+    () => generatePortfolioHtml(profile, experience, projects, skills, config, decorations, { deployUrl, ogImage }),
+    [profile, experience, projects, skills, config, decorations, deployUrl, ogImage],
   );
 
   // Fetching GitHub decorations is async + opt-in: a user with 10 GitHub
@@ -198,6 +228,25 @@ export default function PortfolioBuilder({
               placeholder="https://…/your-photo.jpg"
               className="w-full neo-input px-2.5 py-1.5 text-sm"
             />
+          </div>
+
+          {/* Deployment URL — populates og:url + canonical so social-share
+              previews and Google indexing point at the live page instead of
+              the raw blob. Optional; SEO is still valid when omitted. */}
+          <div>
+            <label className="text-[10px] font-bold uppercase tracking-wide text-muted block mb-1">
+              Deployment URL <span className="text-subtle font-normal normal-case">(optional — for share previews & SEO)</span>
+            </label>
+            <input
+              type="url"
+              value={deployUrl}
+              onChange={e => setDeployUrl(e.target.value)}
+              placeholder="https://your-username.github.io"
+              className="w-full neo-input px-2.5 py-1.5 text-sm"
+            />
+            <p className="text-[10px] text-subtle mt-1 leading-snug">
+              Where you'll host this file. Sets canonical link + Open Graph URL so Slack, LinkedIn, Twitter previews link back here.
+            </p>
           </div>
 
           {/* GitHub enhance toggle */}

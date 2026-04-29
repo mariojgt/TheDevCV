@@ -96,6 +96,18 @@ export default function CVTemplateNeo({
       {/* ── BODY ──────────────────────────── */}
       <div style={{ padding: '0 44px 32px' }}>
 
+        {/* ── AREAS OF EXPERIENCE (relocated above Summary) ── */}
+        {skills.length > 0 && (
+          <NeoSection title="Areas of Experience">
+            {Object.entries(groupedSkills).map(([cat, items]) => (
+              <div key={cat} style={{ marginBottom: '3px', fontSize: '9.5pt' }}>
+                <span style={{ fontWeight: 800, color: TEXT }}>{cat}: </span>
+                <span style={{ color: BODY }}>{items.map((s) => s.name).join(', ')}</span>
+              </div>
+            ))}
+          </NeoSection>
+        )}
+
         {/* ── SUMMARY ─────────────────────── */}
         {profile.summary && (
           <NeoSection title="Summary">
@@ -162,18 +174,6 @@ export default function CVTemplateNeo({
           return eduFirst ? <>{eduBlock}{expBlock}</> : <>{expBlock}{eduBlock}</>;
         })()}
 
-        {/* ── SKILLS ──────────────────────── */}
-        {skills.length > 0 && (
-          <NeoSection title="Skills">
-            {Object.entries(groupedSkills).map(([cat, items]) => (
-              <div key={cat} style={{ marginBottom: '3px', fontSize: '9.5pt' }}>
-                <span style={{ fontWeight: 800, color: TEXT }}>{cat}: </span>
-                <span style={{ color: BODY }}>{items.map((s) => s.name).join(', ')}</span>
-              </div>
-            ))}
-          </NeoSection>
-        )}
-
         {/* ── PROJECTS ────────────────────── */}
         {projects.length > 0 && (
           <NeoSection title="Projects">
@@ -183,8 +183,8 @@ export default function CVTemplateNeo({
                   {p.name}
                   {p.url && <span style={{ fontWeight: 400, color: BRAND }}> — {p.url}</span>}
                 </div>
-                {p.description && (
-                  <div style={{ fontSize: '9pt', color: BODY, marginTop: '1px' }}>{mdToReact(p.description)}</div>
+                {(p.cv_description || p.description) && (
+                  <div style={{ fontSize: '9pt', color: BODY, marginTop: '1px' }}>{mdToReact(p.cv_description || p.description || '')}</div>
                 )}
                 {p.highlights.length > 0 && (
                   <ul style={{ margin: '3px 0 0', paddingLeft: '16px', listStyleType: 'disc' }}>

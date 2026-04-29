@@ -121,6 +121,21 @@ export interface CVProject {
   show_on_cv?: boolean;
   /** Same idea but for the GitHub Portfolio HTML export. */
   show_on_portfolio?: boolean;
+  /** When true, renders an "OPEN SOURCE" pill on the portfolio card linking
+   *  to repo_url. Defaults to FALSE; legacy rows lack the column entirely. */
+  is_open_source?: boolean;
+  /** Source-repo URL (typically GitHub). Distinct from `url` so a project can
+   *  expose both a live demo and a repo link without overloading one field. */
+  repo_url?: string | null;
+  /** Optional CV-specific description that overrides `description` on the CV /
+   *  PDF / plain-text renderers. Empty = render the shared `description`. */
+  cv_description?: string | null;
+  /** Optional portfolio-specific description that overrides `description` on
+   *  the Portfolio HTML renderer. Empty = render the shared `description`. */
+  portfolio_description?: string | null;
+  /** Cover image URL — rendered at the top of the project card on the
+   *  Portfolio export. Not shown on the CV (text-only / ATS-safe). */
+  image_url?: string | null;
 }
 
 export interface CVLanguage {
@@ -189,7 +204,7 @@ export const GAP_PRESETS: { reason: CVGapReason; label: string; hint: string }[]
   { reason: 'other',       label: 'Career Break',             hint: 'Generic honest label when none of the above fits.' },
 ];
 
-export const SKILL_CATEGORIES = ['Technical', 'Soft Skills', 'Tools', 'Frameworks', 'Languages', 'Databases', 'Cloud', 'Other'] as const;
+export const SKILL_CATEGORIES = ['Technical', 'AI', 'Soft Skills', 'Tools', 'Frameworks', 'Languages', 'Databases', 'Cloud', 'Other'] as const;
 export const PROFICIENCY_LEVELS = ['beginner', 'intermediate', 'advanced', 'expert'] as const;
 export const LANGUAGE_LEVELS = ['native', 'fluent', 'professional', 'intermediate', 'basic'] as const;
 

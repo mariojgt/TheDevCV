@@ -925,40 +925,110 @@ Return ONLY the rewritten plain text — no JSON, no quotes, no explanation, no 
 }
 
 /**
- * One-click professional summary drafter. Synthesises a fresh 50–80-word
- * summary from the candidate's *existing* Experience + Skills + Profile data
- * — no free-text input needed from the user.
+ * One-click professional summary drafter. Synthesises a fresh, ATS-optimised
+ * 50–80-word summary from the candidate's existing Experience, Skills,
+ * Certifications, Projects, Languages, and Profile context — no free-text
+ * input needed.
  *
- * Distinct from `improveSection('summary', …)` (which rewrites a summary the
- * user already typed) and from the full-CV `optimizeCV` flow (which returns
- * many suggestions for 3 credits). This is the empty-state / "I don't know
- * how to start" entry point, costing 1 `ai_improve` credit like the project
- * URL importer.
+ * Distinct from `improveSection('summary', …)` (which rewrites a user-typed
+ * summary) and from the full-CV `optimizeCV` flow (which returns many
+ * suggestions for 3 credits). This is the empty-state entry point, costing
+ * 1 `ai_improve` credit.
  *
- * TRUTHFULNESS: the prompt instructs the model to synthesise only from the
- * provided CV data. No invented roles, tools, or metrics.
+ * Research-grounded: pulls UNIVERSAL_CV_RULES (Bock/Google, Harvard OCS,
+ * Jobscan, Ladders eye-tracking, MIT CAPD) plus career-stage and industry
+ * guidance via `buildCandidateContext`, and reinforces the SUMMARY-specific
+ * sentence formula in the task block. The model is given access to the
+ * candidate's most-quantified bullets so the "biggest achievement" sentence
+ * preserves a real metric verbatim — the single highest-leverage signal in
+ * a recruiter's 6-second skim.
+ *
+ * TRUTHFULNESS: the prompt strictly forbids invention. If key facts are
+ * missing the model is instructed to write an honest, shorter summary
+ * rather than padding.
  */
 export async function draftSummaryFromCV(
   profile: Pick<CVProfile, 'target_role' | 'career_stage' | 'industry' | 'job_title' | 'full_name'>,
   experience: CVExperience[],
   skills: CVSkill[],
   settings: UserSettings,
+  certifications: CVCertification[] = [],
+  projects: CVProject[] = [],
+  languages: CVLanguage[] = [],
 ): Promise<string> {
+  // Estimate total years of experience from role date strings. Heuristic —
+  // doesn't need to be perfect, the model will round to a "5+ years" phrase.
+  const yearsOfExperience = (() => {
+    let earliest = Infinity;
+    for (const e of experience) {
+      const m = (e.start_date || '').match(/(19|20)\d{2}/);
+      if (m) earliest = Math.min(earliest, parseInt(m[0], 10));
+    }
+    if (!isFinite(earliest)) return null;
+    const now = new Date().getFullYear();
+    const years = Math.max(0, now - earliest);
+    return years > 0 ? years : null;
+  })();
+
+  // Surface the candidate's MOST QUANTIFIED bullets so the model has prime
+  // raw material for the achievement sentence. Score by digit-count, prefer
+  // bullets with %, $, x-multipliers, or explicit "from X to Y" patterns.
+  const bulletScore = (text: string): number => {
+    const t = text || '';
+    let score = (t.match(/\d/g) || []).length;
+    if (/[%$]/.test(t)) score += 3;
+    if (/\b\d+x\b/i.test(t)) score += 3;
+    if (/\bfrom\s+[\d.,]+.*\bto\s+[\d.,]+/i.test(t)) score += 4;
+    if (/\b(reduced|increased|cut|grew|saved|generated|delivered|shipped|launched)\b/i.test(t)) score += 1;
+    return score;
+  };
+  const topAchievements = experience
+    .flatMap(e => (e.achievements || []).map(text => ({ text, role: e.role, company: e.company })))
+    .filter(b => b.text?.trim())
+    .map(b => ({ ...b, score: bulletScore(b.text) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 6)
+    .map(b => `  • [${b.role || 'Role'} @ ${b.company || 'Company'}] ${b.text}`)
+    .join('\n');
+
   const recentRoles = experience.slice(0, 4).map(e => {
     const dates = [e.start_date, e.is_current ? 'Present' : e.end_date].filter(Boolean).join(' – ');
-    const bullets = (e.achievements || []).slice(0, 3).filter(Boolean).map(a => `    • ${a}`).join('\n');
     const techs = e.technologies?.length ? `  Stack: ${e.technologies.join(', ')}` : '';
-    return `- ${e.role || 'Role'} at ${e.company || 'Company'}${dates ? ` (${dates})` : ''}${techs ? `\n${techs}` : ''}${bullets ? `\n${bullets}` : ''}`;
+    return `- ${e.role || 'Role'} at ${e.company || 'Company'}${dates ? ` (${dates})` : ''}${techs ? `\n${techs}` : ''}`;
   }).join('\n');
 
   const topSkills = skills.slice(0, 12).map(s => s.name).filter(Boolean).join(', ');
 
+  // Notable certs (issuer often a brand the recruiter scans for: AWS, Google,
+  // PMP, CFA, etc.) — limit to top 4 to keep prompt tight.
+  const certsLine = certifications.slice(0, 4)
+    .map(c => [c.name, c.issuer].filter(Boolean).join(', '))
+    .filter(Boolean)
+    .join('; ');
+
+  // Projects matter most for entry-level / career-changer CVs (limited work
+  // history). Surface the top 3 project names + their tech.
+  const projectsLine = projects.slice(0, 3)
+    .map(p => `${p.name}${p.technologies?.length ? ` (${p.technologies.slice(0, 4).join(', ')})` : ''}`)
+    .filter(Boolean)
+    .join('; ');
+
+  // Multilingual is a real differentiator for global / customer-facing roles.
+  const langsLine = languages.length >= 2
+    ? languages.map(l => `${l.language} (${l.proficiency})`).join(', ')
+    : '';
+
   const contextLines = [
-    profile.target_role ? `Target role (weave in verbatim): ${profile.target_role}` : '',
+    profile.target_role ? `TARGET ROLE (use this exact phrase verbatim in sentence 1): ${profile.target_role}` : '',
     profile.job_title ? `Current job title: ${profile.job_title}` : '',
     profile.career_stage ? `Career stage: ${profile.career_stage}` : '',
     profile.industry ? `Industry: ${profile.industry}` : '',
+    yearsOfExperience != null ? `Total years of experience (estimated): ${yearsOfExperience}` : '',
     topSkills ? `Top skills: ${topSkills}` : '',
+    certsLine ? `Notable certifications: ${certsLine}` : '',
+    projectsLine ? `Notable projects: ${projectsLine}` : '',
+    langsLine ? `Languages: ${langsLine}` : '',
+    topAchievements ? `MOST QUANTIFIED ACHIEVEMENTS — use ONE of these verbatim (preserve the metric exactly) for the achievement sentence:\n${topAchievements}` : '',
     recentRoles ? `Recent roles:\n${recentRoles}` : '',
   ].filter(Boolean).join('\n\n');
 
@@ -966,25 +1036,63 @@ export async function draftSummaryFromCV(
     throw new Error('Add at least a target role, one skill, or one experience entry before drafting.');
   }
 
+  // buildCandidateContext appends UNIVERSAL_CV_RULES + per-stage / per-
+  // industry guidance, so a senior candidate gets scope/leadership framing
+  // while an entry-level candidate gets education/projects framing.
+  const candidateContext = buildCandidateContext(profile);
+
+  const systemPrompt = `You are an elite professional-summary writer trained on Laszlo Bock's "Work Rules!" (Google), Harvard OCS, MIT CAPD, Stanford GSB, Jobscan, and Ladders eye-tracking research. Your output beats 95% of human-written summaries on ATS keyword score AND recruiter 6-second-skim retention.${candidateContext}
+
+SUMMARY-SPECIFIC DEEP-DIVE (in addition to the universal SUMMARY SECTION rules above):
+
+WORD COUNT: 50–80 words, 3–4 sentences. Anything past 80 goes unread (Ladders eye-tracking 2018). Anything under 50 reads as undersold.
+
+SENTENCE FORMULA (apply in this order):
+  Sentence 1 — IDENTITY + ROLE
+    [N+ years of experience] + [TARGET ROLE keyword VERBATIM if provided, else current job_title] + [domain or seniority signal].
+    Front-load the role keyword. Exact-title match drives a 10.6× interview-rate lift (Jobscan).
+  Sentence 2 — TECHNICAL SIGNAL
+    Name 2–3 of the candidate's strongest skills using EXACT industry-standard terminology ("React.js" not "React framework"; "CI/CD pipelines" not "deployment automation"). Pull from the Top Skills + role tech stacks below.
+  Sentence 3 — QUANTIFIED ACHIEVEMENT (highest-leverage sentence in the entire CV)
+    Take ONE bullet from MOST QUANTIFIED ACHIEVEMENTS below and rewrite it concisely with its metric preserved verbatim. Use a power verb (Led, Shipped, Reduced, Scaled, Delivered). Do not invent or adjust the metric.
+  Sentence 4 (optional, only if it adds new signal) — DIFFERENTIATOR
+    Multilingual ability, named certifications (AWS, PMP, Google Cloud), notable scale ("8-figure ARR", "200M+ users"), or leadership scope ("led 15-person org"). Skip if redundant.
+
+CAREER-STAGE OPENING:
+  • entry_level / career_changer → lead with degree + headline project + relevant skills (work history is thin)
+  • mid_career → lead with progression + scope ("Senior Engineer with 8 years scaling backend services from 100k to 5M users")
+  • senior / executive → lead with strategic impact + org size + outcomes ("Engineering leader managing $14M budget across 30 engineers")
+
+VOICE & STYLE:
+  • Implied first person ALWAYS — never "I", "My", "We", "Our".
+  • Past tense for past achievements; present tense only for current responsibilities.
+  • Active voice; one idea per sentence; no semicolon-stuffing.
+
+AI-TELL VOCABULARY — RECRUITERS ACTIVELY FILTER FOR THESE (GPTZero, Enhancv 2026):
+  ✗ NEVER use: delve, realm, tapestry, pivotal, intricate, foster, comprehensive, showcasing, adept, tech-savvy, cutting-edge, robust, leverage (as a verb), spearhead (overused), seasoned, passionate, dynamic, results-driven, results-oriented, proven track record, team player, excellent communicator, strong analytical skills, detail-oriented, motivated self-starter, go-getter.
+  ✓ Use concrete verbs (built, shipped, led, reduced, architected, owned) and domain-specific nouns (microservices, recurring revenue, churn, latency, MAUs).
+
+TRUTHFULNESS — NON-NEGOTIABLE:
+  • NEVER invent companies, roles, dates, tools, certifications, metrics, team sizes, or transaction values.
+  • If a metric exists in the bullets below, use it verbatim. If none exists, omit the achievement sentence rather than padding with vague language.
+  • You MAY rephrase to mirror the target role's terminology; you MAY NOT fabricate numbers.
+
+QUALITY BAR — checklist your output passes before returning:
+  □ 50–80 words exactly
+  □ Target role keyword (or job title) appears in the first 8 words
+  □ ≥1 specific number/metric present
+  □ Zero AI-tell words from the blocklist above
+  □ Zero "I/My/We/Our"
+  □ Zero invented facts not present in the candidate context
+
+Return ONLY the summary text — no JSON, no quotes, no markdown, no preamble.`;
+
   return callAI(
-    `You are an ATS-optimised professional summary drafter.
-${UNIVERSAL_CV_RULES}
-
-TASK: Write a FRESH professional summary (3–4 sentences, 50–80 words) synthesised from the candidate's actual work history, technologies, and skills below. Follow SUMMARY SECTION rules strictly:
-- Sentence 1: years of experience (estimate from role dates) + core expertise + TARGET ROLE keyword VERBATIM where provided
-- Sentence 2: 2–3 key technical skills using industry-standard terms (exact names ATS scans for)
-- Sentence 3: biggest quantifiable achievement drawn from the candidate's actual bullets — preserve the metric verbatim
-- Optional 4th: differentiator (domain, scale, leadership)
-- Implied first person (never write "I")
-- Front-load keywords
-
-NEVER invent companies, tools, metrics, or experience the candidate doesn't have. Only synthesise from the provided data. If key facts are missing (e.g. no target role, no metrics), write the best honest summary with what's there — don't pad.
-
-Return ONLY the summary text — no JSON, no quotes, no explanation, no preamble.`,
-    contextLines,
+    systemPrompt,
+    `CANDIDATE CONTEXT (synthesise from this only):\n\n${contextLines}`,
     settings,
     'ai_improve',
-    512,
+    600,
   ).then(s => s.trim());
 }
 

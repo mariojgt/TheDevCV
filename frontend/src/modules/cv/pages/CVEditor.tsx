@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Plus, Trash2, Eye, Download, Brain, ChevronDown, Palette, Coins, Sparkles, FileText, Wand2, Target, Layers, CheckCircle2, GripVertical, RefreshCw, Braces, MessageSquare, Copy, ClipboardList, TrendingUp, AlertCircle, Globe, Info } from 'lucide-react';
+import { ArrowLeft, Save, Loader2, Plus, Trash2, Eye, Download, Brain, ChevronDown, Palette, Coins, Sparkles, FileText, Wand2, Target, Layers, CheckCircle2, GripVertical, RefreshCw, Braces, MessageSquare, Copy, ClipboardList, TrendingUp, AlertCircle, Globe, Info, Github } from 'lucide-react';
 import { useCV } from '../hooks/useCV';
 import { useApp } from '../../../contexts/AppContext';
 import { useToast } from '../../../components/ui/Toast';
@@ -196,11 +196,10 @@ function EntryCard({
 
   return (
     <div
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData('text/entry-index', String(index));
-        e.dataTransfer.effectAllowed = 'move';
-      }}
+      // Drop target only — `draggable` lives on the grip handle below so
+      // text-selection inside child inputs/textareas isn't hijacked into a
+      // card-drag (an HTML5 native-DnD gotcha: any draggable ancestor
+      // intercepts mousedown+move on its descendants).
       onDragOver={(e) => {
         if (e.dataTransfer.types.includes('text/entry-index')) {
           e.preventDefault();
@@ -226,6 +225,14 @@ function EntryCard({
       {/* Collapsed header row */}
       <div className="flex items-center gap-1">
         <div
+          // Drag SOURCE — only the grip handle initiates a card drag, so
+          // inputs, textareas and rich-text editors elsewhere in the card
+          // keep their normal text-selection behaviour.
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData('text/entry-index', String(index));
+            e.dataTransfer.effectAllowed = 'move';
+          }}
           className="shrink-0 pl-2 pr-1 py-3 text-subtle cursor-grab active:cursor-grabbing hover:text-muted"
           title="Drag to reorder"
           onClick={(e) => e.stopPropagation()}
@@ -444,14 +451,21 @@ function BulletHealth({
 }
 
 /**
- * Reorder a list immutably: move `from` -> `to`.
+ * Reorder a list immutably: move `from` -> `to`. If items carry a
+ * `sort_order` field (every CV section row does), renumber it to match the
+ * new index — otherwise the DB persists the old order and the section snaps
+ * back on the next fetch (which orders by sort_order).
  */
 function reorderArray<T>(arr: T[], from: number, to: number): T[] {
   if (from === to || from < 0 || from >= arr.length || to < 0 || to >= arr.length) return arr;
   const next = [...arr];
   const [moved] = next.splice(from, 1);
   next.splice(to, 0, moved);
-  return next;
+  return next.map((item, i) =>
+    item && typeof item === 'object' && 'sort_order' in (item as Record<string, unknown>)
+      ? ({ ...(item as object), sort_order: i } as T)
+      : item,
+  );
 }
 
 /**
@@ -2118,6 +2132,9 @@ export default function CVEditor() {
         experience,
         skills,
         settings,
+        certifications,
+        projects,
+        languages,
       );
       if (!drafted?.trim()) {
         toast('AI returned an empty summary — try filling in a target role or one experience first.', 'error');
@@ -3099,7 +3116,46 @@ export default function CVEditor() {
                       <input type="text" value={proj.name} onChange={e => { const n = [...projects]; n[i] = { ...n[i], name: e.target.value }; setProjects(n); }}
                         placeholder="Project name *" className="neo-input px-2 py-1.5 text-sm" />
                       <input type="text" value={proj.url || ''} onChange={e => { const n = [...projects]; n[i] = { ...n[i], url: e.target.value }; setProjects(n); }}
-                        placeholder="URL" className="neo-input px-2 py-1.5 text-sm" />
+                        placeholder="Live URL (demo, blog post, app store…)" className="neo-input px-2 py-1.5 text-sm" />
+                    </div>
+                    {/* Open-source flag — surfaces a green "OPEN SOURCE" pill on
+                        the portfolio card linking to repo_url. Checking the box
+                        reveals the repo URL field; auto-prefills with proj.url
+                        when it's already a github.com link. */}
+                    <div className="space-y-2">
+                      <label className="flex items-center gap-2 text-xs cursor-pointer select-none">
+                        <input
+                          type="checkbox"
+                          checked={!!proj.is_open_source}
+                          onChange={e => {
+                            const checked = e.target.checked;
+                            const n = [...projects];
+                            const isGhUrl = /^https?:\/\/(www\.)?github\.com\//i.test(proj.url || '');
+                            n[i] = {
+                              ...n[i],
+                              is_open_source: checked,
+                              repo_url: checked
+                                ? (n[i].repo_url || (isGhUrl ? proj.url : ''))
+                                : n[i].repo_url,
+                            };
+                            setProjects(n);
+                          }}
+                          className="w-3.5 h-3.5 accent-brand cursor-pointer"
+                        />
+                        <Github className="w-3.5 h-3.5 text-muted" />
+                        <span className="text-white font-medium">Open-source project</span>
+                        <span className="text-[10px] text-subtle">— shows an OSS pill + repo link on your portfolio</span>
+                      </label>
+                      {proj.is_open_source && (
+                        <input
+                          type="url"
+                          value={proj.repo_url || ''}
+                          onChange={e => { const n = [...projects]; n[i] = { ...n[i], repo_url: e.target.value }; setProjects(n); }}
+                          placeholder="Repository URL (https://github.com/user/repo)"
+                          className="w-full neo-input px-2 py-1.5 text-sm"
+                          aria-label={`Repository URL for ${proj.name || 'project'}`}
+                        />
+                      )}
                     </div>
                     <RichTextEditor
                       mode="paragraph"
@@ -3136,6 +3192,63 @@ export default function CVEditor() {
                         )}
                       </button>
                     </div>
+                    {/* Cover image URL — portfolio-only. Rendered as a 16:9
+                        hero at the top of each project card. CV stays text-
+                        only / ATS-safe so this field is intentionally hidden
+                        from the CV/PDF/plain-text renderers. */}
+                    <div>
+                      <label className="text-[10px] font-bold uppercase tracking-wide text-muted block mb-1">
+                        Cover image URL <span className="text-subtle font-normal normal-case">(portfolio only — 16:9 ideal)</span>
+                      </label>
+                      <input
+                        type="url"
+                        value={proj.image_url || ''}
+                        onChange={e => { const n = [...projects]; n[i] = { ...n[i], image_url: e.target.value }; setProjects(n); }}
+                        placeholder="https://…/screenshot.png"
+                        className="w-full neo-input px-2 py-1.5 text-sm"
+                        aria-label={`Cover image URL for ${proj.name || 'project'}`}
+                      />
+                    </div>
+                    {/* Per-destination overrides — collapsed by default to
+                        keep the card scannable. The shared Description above
+                        is used by both CV and Portfolio unless an override is
+                        provided here. */}
+                    <details className="group rounded-md border-2 border-neo-border/60 bg-surface/40">
+                      <summary className="cursor-pointer list-none flex items-center gap-2 px-3 py-2 text-[11px] hover:bg-surface/60 rounded-md transition-colors">
+                        <Layers className="w-3.5 h-3.5 text-muted" />
+                        <span className="font-bold uppercase tracking-wide text-muted">Per-destination overrides</span>
+                        <span className="text-[10px] text-subtle font-normal normal-case ml-1">(optional — leave blank to reuse the description above)</span>
+                        <ChevronDown className="w-3.5 h-3.5 text-subtle ml-auto group-open:rotate-180 transition-transform" />
+                      </summary>
+                      <div className="px-3 pb-3 pt-1 space-y-3 border-t border-neo-border/40">
+                        <div>
+                          <label className="text-[10px] font-bold uppercase tracking-wide text-muted block mb-1">
+                            CV description <span className="text-subtle font-normal normal-case">(overrides default on CV / PDF / .txt)</span>
+                          </label>
+                          <RichTextEditor
+                            mode="paragraph"
+                            value={proj.cv_description || ''}
+                            onChange={(v) => { const n = [...projects]; n[i] = { ...n[i], cv_description: v }; setProjects(n); }}
+                            placeholder="Optional — tighter, ATS-friendly description for the CV"
+                            minHeight={56}
+                            ariaLabel={`CV-specific description for ${proj.name || 'project'}`}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-[10px] font-bold uppercase tracking-wide text-muted block mb-1">
+                            Portfolio description <span className="text-subtle font-normal normal-case">(overrides default on portfolio)</span>
+                          </label>
+                          <RichTextEditor
+                            mode="paragraph"
+                            value={proj.portfolio_description || ''}
+                            onChange={(v) => { const n = [...projects]; n[i] = { ...n[i], portfolio_description: v }; setProjects(n); }}
+                            placeholder="Optional — longer narrative case-study version for the live site"
+                            minHeight={56}
+                            ariaLabel={`Portfolio-specific description for ${proj.name || 'project'}`}
+                          />
+                        </div>
+                      </div>
+                    </details>
                     <TagsInput
                       value={proj.technologies}
                       onChange={(v) => { const n = [...projects]; n[i] = { ...n[i], technologies: v }; setProjects(n); }}

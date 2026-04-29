@@ -85,6 +85,18 @@ export default function CVTemplateExecutive({
         </div>
       </div>
 
+      {/* ── AREAS OF EXPERIENCE (relocated above Summary) ── */}
+      {skills.length > 0 && (
+        <SerifSection title="Areas of Experience">
+          {Object.entries(groupedSkills).map(([cat, items]) => (
+            <div key={cat} style={{ marginBottom: '4px', fontSize: '10pt' }}>
+              <strong style={{ color: ACCENT }}>{cat}:</strong>{' '}
+              <span style={{ color: BODY }}>{items.map((s) => s.name).join(', ')}</span>
+            </div>
+          ))}
+        </SerifSection>
+      )}
+
       {/* ── SUMMARY (no heading, lead paragraph) ── */}
       {profile.summary && (
         <p style={{
@@ -170,17 +182,6 @@ export default function CVTemplateExecutive({
         return eduFirst ? <>{eduBlock}{expBlock}</> : <>{expBlock}{eduBlock}</>;
       })()}
 
-      {/* ── SKILLS ──────────────────────────────── */}
-      {skills.length > 0 && (
-        <SerifSection title="Core Competencies">
-          {Object.entries(groupedSkills).map(([cat, items]) => (
-            <div key={cat} style={{ marginBottom: '4px', fontSize: '10pt' }}>
-              <strong style={{ color: ACCENT }}>{cat}:</strong>{' '}
-              <span style={{ color: BODY }}>{items.map((s) => s.name).join(', ')}</span>
-            </div>
-          ))}
-        </SerifSection>
-      )}
 
       {/* ── PROJECTS ────────────────────────────── */}
       {projects.length > 0 && (
@@ -191,8 +192,8 @@ export default function CVTemplateExecutive({
                 <strong style={{ color: ACCENT }}>{p.name}</strong>
                 {p.url && <span style={{ color: MUTED }}> — {p.url}</span>}
               </div>
-              {p.description && (
-                <p style={{ margin: '2px 0 0', fontSize: '9.5pt', color: BODY, lineHeight: 1.55 }}>{mdToReact(p.description)}</p>
+              {(p.cv_description || p.description) && (
+                <p style={{ margin: '2px 0 0', fontSize: '9.5pt', color: BODY, lineHeight: 1.55 }}>{mdToReact(p.cv_description || p.description || '')}</p>
               )}
               {p.highlights.length > 0 && (
                 <ul style={{ margin: '2px 0 0', paddingLeft: '20px', listStyleType: 'disc' }}>

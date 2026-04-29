@@ -73,6 +73,18 @@ export default function CVTemplateModern({
         )}
       </div>
 
+      {/* ── AREAS OF EXPERIENCE (relocated above Summary) ── */}
+      {skills.length > 0 && (
+        <Section title="Areas of Experience">
+          {Object.entries(groupedSkills).map(([cat, items]) => (
+            <div key={cat} style={{ marginBottom: '3px', fontSize: '9.5pt' }}>
+              <strong style={{ color: TEXT }}>{cat}:</strong>{' '}
+              <span style={{ color: BODY }}>{items.map((s) => s.name).join(', ')}</span>
+            </div>
+          ))}
+        </Section>
+      )}
+
       {/* ── SUMMARY ───────────────────────── */}
       {profile.summary && (
         <Section title="Professional Summary">
@@ -134,18 +146,6 @@ export default function CVTemplateModern({
         return eduFirst ? <>{eduBlock}{expBlock}</> : <>{expBlock}{eduBlock}</>;
       })()}
 
-      {/* ── SKILLS (single column, by category) ─ */}
-      {skills.length > 0 && (
-        <Section title="Skills">
-          {Object.entries(groupedSkills).map(([cat, items]) => (
-            <div key={cat} style={{ marginBottom: '3px', fontSize: '9.5pt' }}>
-              <strong style={{ color: TEXT }}>{cat}:</strong>{' '}
-              <span style={{ color: BODY }}>{items.map((s) => s.name).join(', ')}</span>
-            </div>
-          ))}
-        </Section>
-      )}
-
       {/* ── PROJECTS ──────────────────────── */}
       {projects.length > 0 && (
         <Section title="Projects">
@@ -155,8 +155,8 @@ export default function CVTemplateModern({
                 <strong style={{ color: TEXT }}>{p.name}</strong>
                 {p.url && <span style={{ color: ACCENT }}> — {p.url}</span>}
               </div>
-              {p.description && (
-                <div style={{ fontSize: '9pt', color: BODY, marginTop: '1px' }}>{mdToReact(p.description)}</div>
+              {(p.cv_description || p.description) && (
+                <div style={{ fontSize: '9pt', color: BODY, marginTop: '1px' }}>{mdToReact(p.cv_description || p.description || '')}</div>
               )}
               {p.highlights.length > 0 && (
                 <ul style={{ margin: '2px 0 0', paddingLeft: '18px', listStyleType: 'disc' }}>
