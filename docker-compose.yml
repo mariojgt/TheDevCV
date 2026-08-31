@@ -1,15 +1,30 @@
 services:
   thedevcv:
     build: .
+    init: true
     ports:
       - "8720:8720"
     volumes:
       # All CV data lives here as plain JSON files — back up this folder.
       - ./data:/data
     environment:
-      # Optional — enables AI rewrites / tailoring / cover letters.
-      # Without it everything else still works.
+      # Optional shared fallback. Users can instead save their own key in Settings.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      # Optional — override the Claude model used by AI features.
       - AI_MODEL=${AI_MODEL:-claude-opus-5}
+      # open | first-user | disabled
+      - REGISTRATION_MODE=${REGISTRATION_MODE:-open}
+      # Optional owner-chosen token for creating the very first account.
+      # If empty, the server generates one and prints it once in startup logs.
+      - BOOTSTRAP_TOKEN=${BOOTSTRAP_TOKEN:-}
+      # auto adds Secure behind HTTPS; use true/false to override.
+      - COOKIE_SECURE=${COOKIE_SECURE:-auto}
+      # Optional stable secrets. If empty, one is generated inside ./data.
+      - SESSION_SECRET=${SESSION_SECRET:-}
+      - SETTINGS_ENCRYPTION_KEY=${SETTINGS_ENCRYPTION_KEY:-}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8720/api/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     restart: unless-stopped

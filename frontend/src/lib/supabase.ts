@@ -6,8 +6,8 @@
  * Node server's JSON-file store instead of Postgres. This keeps every existing
  * call site working without a rewrite.
  *
- * There is no auth in self-hosted mode: a single static local user is always
- * "signed in", and credit/billing RPCs resolve locally as free/unlimited.
+ * Authenticated requests use HTTP-only session cookies (`credentials: 'include'`).
+ * Credit/billing RPCs resolve locally as free/unlimited.
  */
 
 export interface User {
@@ -19,20 +19,37 @@ export interface Session {
   user: User;
 }
 
-export const LOCAL_USER: User = { id: 'local', email: 'you@localhost' };
-
 const API_BASE = '/api';
+export const AUTH_EXPIRED_EVENT = 'thedevcv:auth-expired';
 
 type Row = Record<string, unknown>;
 type Result<T> = { data: T; error: { message: string } | null };
 
+let currentUser: User | null = null;
+const authListeners = new Set<(event: string, session: Session | null) => void>();
+
+function notifyAuth(event: string, session: Session | null) {
+  for (const cb of authListeners) cb(event, session);
+}
+
+export function setAuthUser(user: User | null) {
+  currentUser = user;
+  notifyAuth(user ? 'SIGNED_IN' : 'SIGNED_OUT', user ? { user } : null);
+}
+
 async function apiFetch(path: string, init?: RequestInit): Promise<{ ok: boolean; status: number; body: unknown; response: Response }> {
   const response = await fetch(`${API_BASE}${path}`, {
+    credentials: 'include',
     headers: { 'Content-Type': 'application/json' },
     ...init,
   });
   let body: unknown = null;
   try { body = await response.clone().json(); } catch { /* empty body */ }
+  if (response.status === 401 && !path.startsWith('/auth/')) {
+    currentUser = null;
+    notifyAuth('SIGNED_OUT', null);
+    window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+  }
   return { ok: response.ok, status: response.status, body, response };
 }
 
@@ -201,14 +218,27 @@ export const supabase = {
 
   auth: {
     async getUser() {
-      return { data: { user: LOCAL_USER }, error: null };
+      if (currentUser) return { data: { user: currentUser }, error: null };
+      try {
+        const { ok, body } = await apiFetch('/auth/me');
+        if (!ok) return { data: { user: null }, error: null };
+        currentUser = (body as { user: User }).user;
+        return { data: { user: currentUser }, error: null };
+      } catch {
+        return { data: { user: null }, error: null };
+      }
     },
     async getSession() {
-      return { data: { session: { user: LOCAL_USER } as Session }, error: null };
+      const { data } = await supabase.auth.getUser();
+      return { data: { session: data.user ? { user: data.user } : null }, error: null };
     },
-    onAuthStateChange(_cb: (event: string, session: Session | null) => void) {
-      return { data: { subscription: { unsubscribe() { /* no-op */ } } } };
+    onAuthStateChange(cb: (event: string, session: Session | null) => void) {
+      authListeners.add(cb);
+      return { data: { subscription: { unsubscribe() { authListeners.delete(cb); } } } };
     },
-    async signOut() { /* no-op in self-hosted mode */ },
+    async signOut() {
+      await apiFetch('/auth/logout', { method: 'POST' });
+      setAuthUser(null);
+    },
   },
 };

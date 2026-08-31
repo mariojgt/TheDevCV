@@ -1,21 +1,25 @@
-import { createContext, useContext, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 import { type CreditAction, type UserSettings } from '../lib/types';
+import { AUTH_EXPIRED_EVENT, setAuthUser } from '../lib/supabase';
 
-/**
- * Self-hosted mode: no plans, no credits, no billing. Every capability is
- * unlocked and every "cost" is zero. The interface is kept identical to the
- * old SaaS version so gated components (`hasCredits`, `costOf`, …) work
- * unchanged — the gates simply always pass.
- */
+interface AppSettings extends UserSettings {
+  ai_configured?: boolean;
+  ai_source?: 'user' | 'env' | 'none';
+  ai_key_hint?: string | null;
+  mcp_token?: string;
+}
+
 interface AppContextType {
   credits: number;
   lifetimeGranted: number;
   lifetimeConsumed: number;
   creditsLoading: boolean;
   isAdmin: boolean;
-  settings: UserSettings | null;
+  settings: AppSettings | null;
+  settingsLoading: boolean;
   refreshCredits: () => Promise<void>;
+  refreshSettings: () => Promise<void>;
   hasCredits: (action: CreditAction) => boolean;
   costOf: (action: CreditAction) => number;
 }
@@ -24,24 +28,69 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
+  const [settings, setSettings] = useState<AppSettings | null>(null);
+  const [settingsLoading, setSettingsLoading] = useState(false);
+  const activeUserIdRef = useRef<string | null>(user?.id ?? null);
+  const settingsRequestRef = useRef(0);
+  activeUserIdRef.current = user?.id ?? null;
 
+  useEffect(() => {
+    setAuthUser(user);
+  }, [user]);
+
+  const refreshSettings = useCallback(async () => {
+    const requestedUserId = user?.id ?? null;
+    const requestId = ++settingsRequestRef.current;
+    if (!requestedUserId) {
+      setSettings(null);
+      setSettingsLoading(false);
+      return;
+    }
+    setSettingsLoading(true);
+    try {
+      const response = await fetch('/api/settings', { credentials: 'include' });
+      if (response.status === 401) window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
+      if (!response.ok) throw new Error('settings_fetch_failed');
+      const data = await response.json();
+      if (requestId !== settingsRequestRef.current || activeUserIdRef.current !== requestedUserId) return;
+      setSettings({
+        user_id: data.user_id,
+        theme: data.theme ?? 'dark',
+        ai_enabled: data.ai_enabled ?? false,
+        ai_provider: data.ai_provider ?? 'anthropic',
+        ai_model: data.ai_model ?? 'claude-opus-5',
+        encrypted_api_key: data.ai_configured ? 'configured' : '',
+        ai_configured: data.ai_configured,
+        ai_source: data.ai_source,
+        ai_key_hint: data.ai_key_hint,
+        mcp_token: data.mcp_token,
+      });
+    } catch {
+      if (requestId === settingsRequestRef.current && activeUserIdRef.current === requestedUserId) {
+        setSettings(null);
+      }
+    } finally {
+      if (requestId === settingsRequestRef.current && activeUserIdRef.current === requestedUserId) {
+        setSettingsLoading(false);
+      }
+    }
+  }, [user?.id]);
+
+  useEffect(() => {
+    refreshSettings();
+  }, [refreshSettings]);
+
+  const currentSettings = settings?.user_id === user?.id ? settings : null;
   const value: AppContextType = {
     credits: 999999,
     lifetimeGranted: 0,
     lifetimeConsumed: 0,
     creditsLoading: false,
     isAdmin: false,
-    settings: user
-      ? {
-          user_id: user.id,
-          theme: 'dark',
-          ai_enabled: true,
-          ai_provider: 'anthropic',
-          ai_model: 'server',
-          encrypted_api_key: 'server',
-        }
-      : null,
+    settings: currentSettings,
+    settingsLoading,
     refreshCredits: async () => { /* nothing to refresh */ },
+    refreshSettings,
     hasCredits: () => true,
     costOf: () => 0,
   };

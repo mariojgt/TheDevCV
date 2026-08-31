@@ -71,7 +71,7 @@ function persist(table) {
     await fs.mkdir(DATA_DIR, { recursive: true });
     const file = path.join(DATA_DIR, `${table}.json`);
     const tmp = `${file}.${process.pid}.tmp`;
-    await fs.writeFile(tmp, JSON.stringify(cache.get(table) ?? [], null, 2));
+    await fs.writeFile(tmp, JSON.stringify(cache.get(table) ?? [], null, 2), { mode: 0o600 });
     await fs.rename(tmp, file);
   }).catch((err) => console.error(`[store] persist ${table} failed:`, err));
   writeQueue.set(table, next);
@@ -114,7 +114,9 @@ export async function insert(table, rowOrRows) {
   const now = new Date().toISOString();
   const input = Array.isArray(rowOrRows) ? rowOrRows : [rowOrRows];
   const created = input.map((r) => {
-    const row = { ...r, id: r.id ?? randomUUID(), created_at: r.created_at ?? now };
+    // IDs are always generated at the trust boundary. Accepting caller IDs lets
+    // one account collide with another account's public CV/item IDs.
+    const row = { ...r, id: randomUUID(), created_at: r.created_at ?? now };
     if (HAS_UPDATED_AT.has(table)) row.updated_at = now;
     return row;
   });

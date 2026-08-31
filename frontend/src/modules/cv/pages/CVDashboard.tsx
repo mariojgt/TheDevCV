@@ -435,7 +435,7 @@ export default function CVDashboard() {
           duplicateCost={createCost}
           aiCost={costOf('ai_improve')}
           credits={credits}
-          aiAvailable={!!settings}
+          aiAvailable={Boolean(settings?.ai_configured)}
           onCancel={() => { if (duplicating !== duplicateTarget.id) setDuplicateTarget(null); }}
           onConfirm={handleDuplicateConfirm}
         />
@@ -636,4 +636,3 @@ export default function CVDashboard() {
     </div>
   );
 }
-

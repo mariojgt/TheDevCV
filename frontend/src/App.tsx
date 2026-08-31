@@ -1,6 +1,9 @@
 import { Routes, Route, Navigate } from 'react-router-dom';
 import AppShell from './components/AppShell';
+import ProtectedRoute, { GuestRoute } from './components/ProtectedRoute';
 import Settings from './pages/Settings';
+import Login from './pages/Login';
+import Signup from './pages/Signup';
 
 import CVDashboard from './modules/cv/pages/CVDashboard';
 import CVEditor from './modules/cv/pages/CVEditor';
@@ -14,17 +17,18 @@ import FullScreenShell from './components/FullScreenShell';
 export default function App() {
   return (
     <Routes>
-      {/* Public share links still work — tokenised, read-only. */}
+      <Route path="/login" element={<GuestRoute><Login /></GuestRoute>} />
+      <Route path="/signup" element={<GuestRoute><Signup /></GuestRoute>} />
+
+      {/* Public share links — tokenised, read-only. */}
       <Route path="/s/:token" element={<PublicCV />} />
 
-      {/* App — no auth in self-hosted mode, straight to the dashboard. */}
-      <Route path="/" element={<AppShell />}>
+      <Route path="/" element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
         <Route index element={<CVDashboard />} />
         <Route path="settings" element={<Settings />} />
       </Route>
 
-      {/* CV module — dashboard + peripheral pages keep the sidebar chrome. */}
-      <Route path="/cv" element={<AppShell />}>
+      <Route path="/cv" element={<ProtectedRoute><AppShell /></ProtectedRoute>}>
         <Route index               element={<CVDashboard />} />
         <Route path="import"       element={<CVImport />} />
         <Route path="match"        element={<CVJobMatch />} />
@@ -34,10 +38,7 @@ export default function App() {
         <Route path="discover"     element={<JobsDiscovery />} />
       </Route>
 
-      {/* Full-page editor (resume.io-style) — no sidebar, viewport-wide split pane.
-          Literal siblings above (/cv/new, /cv/import, /cv/match, /cv/jobs, /cv/discover)
-          win over the :id param, so no conflict. */}
-      <Route element={<FullScreenShell />}>
+      <Route element={<ProtectedRoute><FullScreenShell /></ProtectedRoute>}>
         <Route path="/cv/new" element={<CVEditor />} />
         <Route path="/cv/:id" element={<CVEditor />} />
       </Route>

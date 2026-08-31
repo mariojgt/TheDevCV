@@ -1,7 +1,7 @@
 {
   "name": "thedevcv-server",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.0",
   "type": "module",
   "engines": {
     "node": ">=20.11"

@@ -34,9 +34,9 @@ export interface UserCredits {
  * Shape consumed by the CV module's useApp() hook.
  *
  * `encrypted_api_key` / `ai_provider` / `ai_model` are legacy fields from the
- * original Archiva module. In The Dev CV the Anthropic key lives server-side in
- * the `ai` Edge Function — we set `encrypted_api_key` to a sentinel string
- * ("server") purely so UI guards like `if (!settings.encrypted_api_key)` pass.
+ * original Archiva module. In The Dev CV the Anthropic key lives server-side;
+ * we set `encrypted_api_key` to a sentinel string ("configured") purely so UI
+ * guards like `if (!settings.encrypted_api_key)` pass.
  * Never treat this as a real key.
  */
 export interface UserSettings {

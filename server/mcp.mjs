@@ -1,15 +1,12 @@
 /**
- * MCP endpoint — exposes CV editing tools over Streamable HTTP at /mcp so any
- * MCP client (Claude Code, Claude Desktop, …) can read and improve CVs and the
- * UI live-refreshes as edits land (via the store's change events → SSE).
- *
- * Stateless mode: a fresh McpServer + transport per request. No sessions, no
- * auth — this is a self-hosted, local-first tool.
+ * MCP endpoint — exposes CV editing tools over Streamable HTTP at /mcp.
+ * Requires authentication via session cookie or Bearer MCP token (Settings page).
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { z } from 'zod';
 import * as store from './store.mjs';
+import * as access from './access.mjs';
 import { SECTION_TABLES, getFullCV, duplicateCV } from './cv.mjs';
 
 const SECTIONS = Object.keys(SECTION_TABLES);
@@ -51,15 +48,17 @@ function fail(message) {
   return { content: [{ type: 'text', text: JSON.stringify({ error: message }) }], isError: true };
 }
 
-function buildServer() {
-  const server = new McpServer({ name: 'thedevcv', version: '1.0.0' });
+function buildServer(userId) {
+  const server = new McpServer({ name: 'thedevcv', version: '1.1.0' });
 
   server.registerTool('list_cvs', {
     title: 'List CVs',
-    description: 'List every CV in this self-hosted TheDevCV instance with id, version name, owner name, target role and last-updated time. Start here to find the CV the user wants to work on.',
+    description: 'List every CV owned by the signed-in user with id, version name, owner name, target role and last-updated time. Start here to find the CV the user wants to work on.',
     inputSchema: {},
   }, async () => {
-    const profiles = await store.list('cv_profiles', { order: [{ column: 'is_default', ascending: false }] });
+    const profiles = await access.listForUser('cv_profiles', userId, {
+      order: [{ column: 'is_default', ascending: false }],
+    });
     return ok(profiles.map((p) => ({
       id: p.id,
       version_name: p.version_name,
@@ -77,6 +76,7 @@ function buildServer() {
     description: 'Fetch one CV with every section (experience, education, skills, certifications, projects, languages) including item ids needed for updates.',
     inputSchema: { cv_id: z.string().describe('CV profile id from list_cvs') },
   }, async ({ cv_id }) => {
+    if (!(await access.userOwnsProfile(userId, cv_id))) return fail(`No CV with id ${cv_id}`);
     const cv = await getFullCV(cv_id);
     return cv ? ok(cv) : fail(`No CV with id ${cv_id}`);
   });
@@ -86,12 +86,14 @@ function buildServer() {
     description: 'Create a new CV profile. Add sections afterwards with add_cv_item.',
     inputSchema: { ...PROFILE_FIELDS, full_name: z.string().describe('Candidate full name') },
   }, async (fields) => {
-    const [created] = await store.insert('cv_profiles', {
+    const row = {
       version_name: 'Main CV',
       is_default: false,
-      user_id: 'local',
+      user_id: userId,
       ...fields,
-    });
+    };
+    await access.assertCanWriteRows('cv_profiles', userId, row);
+    const [created] = await store.insert('cv_profiles', row);
     return ok(created);
   });
 
@@ -101,6 +103,7 @@ function buildServer() {
     inputSchema: { cv_id: z.string(), ...PROFILE_FIELDS },
   }, async ({ cv_id, ...fields }) => {
     if (!Object.keys(fields).length) return fail('Pass at least one field to update');
+    if (!(await access.userOwnsProfile(userId, cv_id))) return fail(`No CV with id ${cv_id}`);
     const [updated] = await store.update('cv_profiles', { id: cv_id }, fields);
     return updated ? ok(updated) : fail(`No CV with id ${cv_id}`);
   });
@@ -114,7 +117,8 @@ function buildServer() {
       version_name: z.string().optional(),
     },
   }, async ({ cv_id, target_role, version_name }) => {
-    const copy = await duplicateCV(cv_id, { targetRole: target_role, versionName: version_name });
+    if (!(await access.userOwnsProfile(userId, cv_id))) return fail(`No CV with id ${cv_id}`);
+    const copy = await duplicateCV(cv_id, { targetRole: target_role, versionName: version_name, userId });
     return copy ? ok(copy) : fail(`No CV with id ${cv_id}`);
   });
 
@@ -123,6 +127,7 @@ function buildServer() {
     description: 'Permanently delete a CV and all of its sections. Irreversible — confirm with the user first.',
     inputSchema: { cv_id: z.string() },
   }, async ({ cv_id }) => {
+    if (!(await access.userOwnsProfile(userId, cv_id))) return fail(`No CV with id ${cv_id}`);
     const { removed } = await store.remove('cv_profiles', { id: cv_id });
     return removed ? ok({ deleted: cv_id }) : fail(`No CV with id ${cv_id}`);
   });
@@ -136,15 +141,12 @@ function buildServer() {
       item: z.record(z.string(), z.any()).describe('Item fields for the chosen section (see tool description)'),
     },
   }, async ({ cv_id, section, item }) => {
-    const profile = await store.getById('cv_profiles', cv_id);
-    if (!profile) return fail(`No CV with id ${cv_id}`);
+    if (!(await access.userOwnsProfile(userId, cv_id))) return fail(`No CV with id ${cv_id}`);
     const table = SECTION_TABLES[section];
     const existing = await store.list(table, { where: { profile_id: cv_id } });
-    const [created] = await store.insert(table, {
-      sort_order: existing.length,
-      ...item,
-      profile_id: cv_id,
-    });
+    const row = { sort_order: existing.length, ...item, profile_id: cv_id };
+    await access.assertCanWriteRows(table, userId, row);
+    const [created] = await store.insert(table, row);
     return ok(created);
   });
 
@@ -158,8 +160,12 @@ function buildServer() {
     },
   }, async ({ section, item_id, fields }) => {
     if (!Object.keys(fields).length) return fail('Pass at least one field to update');
+    const table = SECTION_TABLES[section];
+    const existing = await store.getById(table, item_id);
+    if (!existing) return fail(`No ${section} item with id ${item_id}`);
+    await access.assertCanReadRow(table, userId, existing);
     const { profile_id: _p, ...safe } = fields;
-    const [updated] = await store.update(SECTION_TABLES[section], { id: item_id }, safe);
+    const [updated] = await store.update(table, { id: item_id }, safe);
     return updated ? ok(updated) : fail(`No ${section} item with id ${item_id}`);
   });
 
@@ -168,7 +174,11 @@ function buildServer() {
     description: 'Remove one item from a CV section.',
     inputSchema: { section: z.enum(SECTIONS), item_id: z.string() },
   }, async ({ section, item_id }) => {
-    const { removed } = await store.remove(SECTION_TABLES[section], { id: item_id });
+    const table = SECTION_TABLES[section];
+    const existing = await store.getById(table, item_id);
+    if (!existing) return fail(`No ${section} item with id ${item_id}`);
+    await access.assertCanReadRow(table, userId, existing);
+    const { removed } = await store.remove(table, { id: item_id });
     return removed ? ok({ deleted: item_id }) : fail(`No ${section} item with id ${item_id}`);
   });
 
@@ -176,7 +186,12 @@ function buildServer() {
 }
 
 /** Handle one HTTP request against a fresh stateless server instance. */
-export async function handleMcpRequest(req, res, body) {
+export async function handleMcpRequest(req, res, body, user) {
+  if (!user) {
+    res.writeHead(401, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'unauthorized', detail: 'Sign in or pass your MCP token as Authorization: Bearer <token>.' }));
+    return;
+  }
   if (req.method !== 'POST') {
     res.writeHead(405, { 'Content-Type': 'application/json', Allow: 'POST' });
     res.end(JSON.stringify({
@@ -186,7 +201,7 @@ export async function handleMcpRequest(req, res, body) {
     }));
     return;
   }
-  const server = buildServer();
+  const server = buildServer(user.id);
   const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
   res.on('close', () => {
     transport.close();

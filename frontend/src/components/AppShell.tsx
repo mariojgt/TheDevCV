@@ -1,9 +1,11 @@
 import { useState, useEffect } from 'react';
-import { NavLink, Outlet, Link, useLocation } from 'react-router-dom';
-import { FileUser, Briefcase, Target, Settings, Compass, Command, Menu, X } from 'lucide-react';
+import { NavLink, Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
+import { FileUser, Briefcase, Target, Settings, Compass, Command, Menu, X, LogOut, Loader2 } from 'lucide-react';
 import Logo from './Logo';
 import PlanBadge from './PlanBadge';
 import CommandPalette from './CommandPalette';
+import { useAuth } from '../contexts/AuthContext';
+import { useToast } from './ui/Toast';
 
 const baseNav = [
   { to: '/',            label: 'Dashboard',     icon: FileUser },
@@ -15,12 +17,28 @@ const baseNav = [
 
 export default function AppShell() {
   const location = useLocation();
+  const navigate = useNavigate();
+  const { user, signOut } = useAuth();
+  const { toast } = useToast();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
 
+  const handleSignOut = async () => {
+    setSigningOut(true);
+    try {
+      await signOut();
+      navigate('/login', { replace: true });
+    } catch {
+      toast('Could not sign out. Please try again.', 'error');
+    } finally {
+      setSigningOut(false);
+    }
+  };
+
   return (
-    <div className="min-h-screen flex text-white">
+    <div className="h-screen flex overflow-hidden text-white">
       {/* Mobile backdrop */}
       {sidebarOpen && (
         <div
@@ -83,18 +101,31 @@ export default function AppShell() {
           </div>
         </nav>
 
-        <div className="px-3 py-3 border-t-[3px] border-neo-border bg-surface-light">
+        <div className="px-3 py-3 border-t-[3px] border-neo-border bg-surface-light space-y-2.5">
           <div className="flex items-center justify-between px-1">
             <PlanBadge />
             <Link to="/settings" className="text-muted hover:text-brand-light transition-colors" title="Settings">
               <Settings className="w-4 h-4" />
             </Link>
           </div>
+          <div className="flex items-center gap-2 px-1 min-w-0">
+            <span className="flex-1 truncate text-[10px] text-muted" title={user?.email}>{user?.email}</span>
+            <button
+              type="button"
+              onClick={handleSignOut}
+              disabled={signingOut}
+              className="p-1.5 rounded-sm border-2 border-neo-border text-muted hover:text-red-300 hover:border-red-500/70 disabled:opacity-50 transition-colors"
+              aria-label="Sign out"
+              title="Sign out"
+            >
+              {signingOut ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <LogOut className="w-3.5 h-3.5" />}
+            </button>
+          </div>
         </div>
       </aside>
 
       {/* Main */}
-      <main className="flex-1 overflow-y-auto min-w-0">
+      <main className="h-full flex-1 overflow-y-auto min-w-0">
         {/* Mobile top bar — hamburger + compact logo + instance badge */}
         <div className="md:hidden sticky top-0 z-20 flex items-center gap-3 px-4 h-14 bg-[#080d19]/95 backdrop-blur-md border-b-[3px] border-neo-border">
           <button
