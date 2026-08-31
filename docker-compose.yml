@@ -1,0 +1,15 @@
+services:
+  thedevcv:
+    build: .
+    ports:
+      - "8720:8720"
+    volumes:
+      # All CV data lives here as plain JSON files — back up this folder.
+      - ./data:/data
+    environment:
+      # Optional — enables AI rewrites / tailoring / cover letters.
+      # Without it everything else still works.
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      # Optional — override the Claude model used by AI features.
+      - AI_MODEL=${AI_MODEL:-claude-opus-5}
+    restart: unless-stopped

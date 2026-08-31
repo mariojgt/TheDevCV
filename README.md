@@ -1,128 +1,105 @@
-# The Dev CV
+# The Dev CV — self-hosted
 
 ATS-compliant CV builder for developers. Part of [The Dev Realm](https://new.thedevrealm.com).
 
+Fully self-hosted and local-first: **no database, no accounts, no billing, no tracking**. One small Node server stores everything as plain JSON files on disk and ships with an **MCP server built in**, so you can connect Claude (or any MCP client) and ask it to improve and iterate on your CVs.
+
 - **Frontend** — React 19 + Vite + Tailwind 4 (`frontend/`)
-- **Backend** — Supabase (Postgres + Auth + Edge Functions) (`supabase/`)
-- **Billing** — Stripe Checkout + Customer Portal (webhook-synced)
-- **AI** — Anthropic Claude proxied through a Supabase Edge Function (so the key is never exposed to the browser)
+- **Server** — single Node process (`server/`): static hosting + JSON-file storage + AI proxy + MCP
+- **AI** — Anthropic Claude, proxied through the server so your key never reaches the browser (optional)
+- **MCP** — `POST /mcp` (Streamable HTTP) with 9 CV-editing tools
 
 ---
 
-## Plans
+## Quick start (Docker)
 
-| Capability                         | Free           | Pro |
-| ---------------------------------- | -------------- | --- |
-| CV versions                        | **1** (DB-enforced) | Unlimited |
-| ATS score & gap analysis           | ✅             | ✅ |
-| PDF export (ATS-safe template)     | ✅             | ✅ |
-| AI field-level rewrites            | ✅             | ✅ |
-| AI tailor-to-job (full CV rewrite) | —              | ✅ |
-| Cover-letter generator             | —              | ✅ |
-| Premium templates                  | —              | ✅ |
-| Interview prep / salary intel      | —              | ✅ |
+```sh
+# optional: put ANTHROPIC_API_KEY=sk-ant-... in a .env file next to docker-compose.yml
+docker compose up -d
+# → http://localhost:8720
+```
 
-Free-tier enforcement lives in the database (`enforce_cv_profile_quota` trigger in `supabase/migrations/00003_plans.sql`) — the client can't bypass it.
+Your data lives in `./data` as human-readable JSON — back it up by copying the folder (or use **Settings → Download backup** in the app).
+
+Without Docker:
+
+```sh
+cd frontend && npm install && npm run build && cd ..
+cd server && npm install && cd ..
+ANTHROPIC_API_KEY=sk-ant-... node server/index.mjs
+# → http://localhost:8720
+```
+
+### Server environment
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | *(unset)* | Enables AI features (rewrites, ATS tailoring, cover letters). Everything else works without it. |
+| `AI_MODEL` | `claude-opus-5` | Claude model used by AI features |
+| `DATA_DIR` | `./data` (`/data` in Docker) | Where the JSON files live |
+| `PORT` | `8720` | HTTP port |
+
+---
+
+## MCP — let AI improve your CVs
+
+The server exposes an MCP endpoint at `http://localhost:8720/mcp`. Connect it and ask Claude things like *"review my CV and tighten the experience bullets"*, *"duplicate my CV tailored for a Staff Engineer role"*, or *"add the keywords from this job ad"*. The dashboard live-refreshes as edits land.
+
+**Claude Code:**
+
+```sh
+claude mcp add --transport http thedevcv http://localhost:8720/mcp
+```
+
+**Claude Desktop** (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "thedevcv": { "type": "http", "url": "http://localhost:8720/mcp" }
+  }
+}
+```
+
+Tools: `list_cvs`, `get_cv`, `create_cv`, `update_cv`, `duplicate_cv`, `delete_cv`, `add_cv_item`, `update_cv_item`, `delete_cv_item`.
+
+> ⚠️ The MCP endpoint (like the rest of the app) has **no authentication** — it's a single-user, local-first tool. Keep it on localhost or put your own reverse-proxy auth in front if you expose it.
+
+The **Settings** page in the app shows the same connection snippets with copy buttons, plus server/AI status and a one-click JSON backup.
 
 ---
 
 ## Local development
 
-### 1. Install
+Two processes — the API server and the Vite dev server (which proxies `/api` + `/mcp` to it):
 
 ```sh
-cd frontend
-npm install
-```
+# terminal 1 — API + MCP + storage
+cd server && npm install && PORT=8720 node index.mjs
 
-### 2. Environment variables
-
-Copy `.env.example` to `.env` and fill in the Supabase + Stripe values:
-
-```sh
-cp frontend/.env.example frontend/.env
-```
-
-Required:
-
-- `VITE_SUPABASE_URL` — your Supabase project URL
-- `VITE_SUPABASE_ANON_KEY` — Supabase publishable (anon) key
-- `VITE_STRIPE_PUBLISHABLE_KEY` — Stripe public key (optional, only if you render Stripe Elements)
-- `VITE_APP_URL` — e.g. `http://localhost:5174`
-
-The publishable key shipped in `.env` is public by design — it can't mutate data outside what RLS allows. Never commit your **service_role** key.
-
-### 3. Run
-
-```sh
-cd frontend
-npm run dev
+# terminal 2 — frontend with HMR
+cd frontend && npm install && npm run dev
 # → http://localhost:5174
 ```
 
+No frontend env vars are needed. `VITE_BACKEND_URL` overrides the dev-proxy target if your server runs elsewhere.
+
 ---
 
-## Supabase setup
+## HTTP API
 
-### Apply migrations
+Everything the frontend uses is a plain JSON API you can script against:
 
-```sh
-supabase link --project-ref <your-project-ref>
-supabase db push
-```
-
-Migrations, in order:
-
-| File                              | What it does |
-| --------------------------------- | ------------ |
-| `00001_init.sql`                  | Extensions + `update_updated_at()` trigger fn |
-| `00002_cv_schema.sql`             | `cv_profiles`, `cv_experience`, …, `job_applications` with RLS |
-| `00003_plans.sql`                 | `user_plans` + free-tier quota trigger + `get_my_plan()` |
-| `00004_stripe.sql`                | Stripe columns, `stripe_events` idempotency table, `apply_stripe_subscription()` |
-
-### Deploy Edge Functions
-
-```sh
-# AI proxy (required for any AI feature)
-supabase functions deploy ai
-
-# Stripe billing (required for Pro)
-supabase functions deploy stripe-checkout
-supabase functions deploy stripe-portal
-supabase functions deploy stripe-webhook   # note: JWT verification disabled in config.toml
-```
-
-### Required Edge Function secrets
-
-```sh
-# AI
-supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
-supabase secrets set AI_MODEL=claude-sonnet-4-6       # optional
-
-# Stripe
-supabase secrets set STRIPE_SECRET_KEY=sk_live_or_test_...
-supabase secrets set STRIPE_WEBHOOK_SECRET=whsec_...
-supabase secrets set STRIPE_PRICE_PRO_MONTHLY=price_...
-supabase secrets set STRIPE_PRICE_PRO_YEARLY=price_...
-supabase secrets set APP_URL=https://thedevcv.com     # or your deployed URL
-```
-
-`SUPABASE_URL`, `SUPABASE_ANON_KEY`, and `SUPABASE_SERVICE_ROLE_KEY` are injected automatically.
-
-### Stripe webhook endpoint
-
-Point your Stripe webhook at:
-
-```
-https://<project-ref>.supabase.co/functions/v1/stripe-webhook
-```
-
-Subscribe to:
-
-- `checkout.session.completed`
-- `customer.subscription.created`
-- `customer.subscription.updated`
-- `customer.subscription.deleted`
+| Route | Purpose |
+| --- | --- |
+| `GET/POST/PATCH/DELETE /api/db/:table` | Generic CRUD over the JSON store (`cv_profiles`, `cv_experience`, …, `job_applications`) |
+| `POST /api/rpc/:name` | `ensure_share_token`, `get_shared_cv`, `record_cv_event`, `get_cv_stats` |
+| `POST /api/fn/ai` | Claude proxy — `{ prompt, system?, max_tokens? }` → `{ text }` |
+| `POST /api/fn/jobs-proxy` | Job-board aggregation (Remotive/RemoteOK/Arbeitnow) + company intel |
+| `GET /api/events` | SSE change feed (`{ table }`) — powers live refresh |
+| `GET /api/export` | Full JSON backup of every table |
+| `GET /api/health` | Status, AI availability, data dir |
+| `POST /mcp` | MCP endpoint (Streamable HTTP) |
 
 ---
 
@@ -131,43 +108,23 @@ Subscribe to:
 ```
 TheDevCV/
 ├── frontend/
-│   ├── src/
-│   │   ├── App.tsx                    # Router
-│   │   ├── main.tsx                   # Entrypoint (providers)
-│   │   ├── index.css                  # Brand tokens (dark, emerald accent)
-│   │   ├── contexts/
-│   │   │   ├── AuthContext.tsx        # Supabase session
-│   │   │   └── AppContext.tsx         # Plan gating: useApp().plan + .can(capability)
-│   │   ├── components/
-│   │   │   ├── AppShell.tsx           # Sidebar + main layout
-│   │   │   ├── RequireAuth.tsx
-│   │   │   ├── Logo.tsx, PlanBadge.tsx
-│   │   │   └── ui/                    # Button, Card, Badge, Toast, …
-│   │   ├── lib/
-│   │   │   ├── supabase.ts
-│   │   │   ├── ai-client.ts           # Thin wrapper around the `ai` Edge Function
-│   │   │   ├── ocr.ts                 # PDF + image → text (tesseract.js + pdf.js)
-│   │   │   └── types.ts
-│   │   ├── pages/
-│   │   │   ├── Landing.tsx, Login.tsx, Signup.tsx
-│   │   │   ├── Pricing.tsx, BillingSuccess.tsx, Account.tsx
-│   │   │   └── UpgradeRequired.tsx
-│   │   └── modules/cv/                # Ported from the Archiva CV module
-│   │       ├── pages/                 # CVDashboard, CVEditor, CVImport, CVJobMatch, JobTracker
-│   │       ├── components/            # Templates + ATS analysis + OptimizePanel
-│   │       ├── hooks/                 # useCV, useJobs
-│   │       ├── lib/                   # ai.ts, jobAI.ts, import.ts, pdf.ts
-│   │       └── types.ts
-│   └── ...
-└── supabase/
-    ├── config.toml                    # Local dev config; stripe-webhook has verify_jwt = false
-    ├── migrations/                    # See table above
-    └── functions/
-        ├── _shared/{cors.ts,auth.ts}
-        ├── ai/                        # Claude proxy
-        ├── stripe-checkout/           # Creates a Checkout Session for Pro
-        ├── stripe-portal/             # Opens the Stripe billing portal
-        └── stripe-webhook/            # Flips user_plans on subscription events
+│   └── src/
+│       ├── App.tsx                    # Router (no auth — straight to dashboard)
+│       ├── lib/
+│       │   ├── supabase.ts            # Local API client (same query surface as the old Supabase client)
+│       │   ├── ai-client.ts           # aiComplete() → POST /api/fn/ai
+│       │   └── useLiveRefresh.ts      # SSE subscription hook
+│       ├── contexts/                  # Static local user, everything unlocked
+│       ├── pages/Settings.tsx         # Server status, MCP connect snippets, backup
+│       └── modules/cv/                # Editor, templates, ATS analysis, job tracker
+├── server/
+│   ├── index.mjs                      # HTTP server: static + /api + /mcp + SSE
+│   ├── store.mjs                      # JSON-file store (atomic writes, change events)
+│   ├── cv.mjs                         # Share links, analytics, duplicate — old RPC ports
+│   ├── jobs.mjs                       # Jobs/company proxy
+│   └── mcp.mjs                        # MCP server (9 CV tools)
+├── Dockerfile                         # Multi-stage → small alpine image
+└── docker-compose.yml                 # One service + ./data volume
 ```
 
 ---
@@ -175,16 +132,10 @@ TheDevCV/
 ## Conventions
 
 - **AI calls** go through `aiComplete()` in `src/lib/ai-client.ts`. Never import the Anthropic SDK in the browser.
-- **Plan gating** — use `const { plan, can } = useApp();` to guard UI. Wrap routes with `<ProRoute>` in `App.tsx` for hard gates.
-- **Free tier is DB-enforced** — even if a client bypasses the UI, the `enforce_cv_profile_quota` trigger will reject the insert with error code `P0001`.
+- **Data access** goes through the query client in `src/lib/supabase.ts` (kept under its old name so the CV module's call sites stay unchanged). It speaks to `/api/db/:table` — there is no Postgres and no RLS; the server is the trust boundary (which, self-hosted, is you).
+- **Everything is unlocked** — `useApp().hasCredits()` always passes and `costOf()` is 0. The old credit/plan gates remain in the UI code but are permanently open.
 - **Brand tokens** live in `src/index.css` (`--color-primary` is emerald-400, surfaces are near-black).
 
----
+## Migrating from the old Supabase version
 
-## What's left / nice-to-have
-
-- Google OAuth (Supabase Auth supports it — just flip it on)
-- Stripe Tax auto-registration per country
-- Email notifications (magic-link sign-in, interview reminders)
-- Public share links for CVs (read-only)
-- Mobile-first editor polish
+Export each table from Postgres as JSON arrays and drop the files into `DATA_DIR` as `<table>.json` (e.g. `cv_profiles.json`). Column names are unchanged. `user_id` values don't matter anymore — the self-hosted build ignores them.

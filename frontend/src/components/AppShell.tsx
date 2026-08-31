@@ -1,35 +1,23 @@
 import { useState, useEffect } from 'react';
-import { NavLink, Outlet, Link, useNavigate, useLocation } from 'react-router-dom';
-import { FileUser, Briefcase, Target, LogOut, User, CreditCard, Coins, Shield, Compass, Command, Menu, X } from 'lucide-react';
+import { NavLink, Outlet, Link, useLocation } from 'react-router-dom';
+import { FileUser, Briefcase, Target, Settings, Compass, Command, Menu, X } from 'lucide-react';
 import Logo from './Logo';
 import PlanBadge from './PlanBadge';
 import CommandPalette from './CommandPalette';
-import { useAuth } from '../contexts/AuthContext';
-import { useApp } from '../contexts/AppContext';
 
 const baseNav = [
   { to: '/',            label: 'Dashboard',     icon: FileUser },
   { to: '/cv/discover', label: 'Discover',      icon: Compass },
   { to: '/cv/jobs',     label: 'Applications',  icon: Briefcase },
   { to: '/cv/match',    label: 'Tailor to job', icon: Target },
-  { to: '/pricing',     label: 'Buy credits',   icon: Coins },
-  { to: '/account',     label: 'Account',       icon: User },
+  { to: '/settings',    label: 'Settings',      icon: Settings },
 ];
 
 export default function AppShell() {
-  const { user, signOut } = useAuth();
-  const { isAdmin } = useApp();
-  const navigate = useNavigate();
   const location = useLocation();
-  const nav = isAdmin ? [...baseNav, { to: '/app/admin', label: 'Admin', icon: Shield }] : baseNav;
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   useEffect(() => { setSidebarOpen(false); }, [location.pathname]);
-
-  const handleSignOut = async () => {
-    await signOut();
-    navigate('/login');
-  };
 
   return (
     <div className="min-h-screen flex text-white">
@@ -68,7 +56,7 @@ export default function AppShell() {
         </div>
 
         <nav className="flex-1 px-3 py-4 space-y-1">
-          {nav.map(({ to, label, icon: Icon }) => (
+          {baseNav.map(({ to, label, icon: Icon }) => (
             <NavLink
               key={to}
               to={to}
@@ -95,30 +83,19 @@ export default function AppShell() {
           </div>
         </nav>
 
-        <div className="px-3 py-3 border-t-[3px] border-neo-border space-y-2 bg-surface-light">
+        <div className="px-3 py-3 border-t-[3px] border-neo-border bg-surface-light">
           <div className="flex items-center justify-between px-1">
             <PlanBadge />
-            <Link to="/account" className="text-muted hover:text-brand-light transition-colors" title="Account">
-              <CreditCard className="w-4 h-4" />
+            <Link to="/settings" className="text-muted hover:text-brand-light transition-colors" title="Settings">
+              <Settings className="w-4 h-4" />
             </Link>
-          </div>
-          <div className="flex items-center gap-2 px-1">
-            <div className="w-7 h-7 rounded-sm border-2 border-brand bg-brand/20 flex items-center justify-center shrink-0">
-              <span className="text-[10px] font-mono font-bold text-brand-light">
-                {user?.email?.[0]?.toUpperCase() ?? '·'}
-              </span>
-            </div>
-            <span className="text-[11px] font-mono text-muted truncate flex-1">{user?.email}</span>
-            <button onClick={handleSignOut} className="text-muted hover:text-red-400 transition-colors" title="Sign out">
-              <LogOut className="w-4 h-4" />
-            </button>
           </div>
         </div>
       </aside>
 
       {/* Main */}
       <main className="flex-1 overflow-y-auto min-w-0">
-        {/* Mobile top bar — hamburger + compact logo + credit balance */}
+        {/* Mobile top bar — hamburger + compact logo + instance badge */}
         <div className="md:hidden sticky top-0 z-20 flex items-center gap-3 px-4 h-14 bg-[#080d19]/95 backdrop-blur-md border-b-[3px] border-neo-border">
           <button
             type="button"

@@ -10,6 +10,7 @@ import { supabase } from '../../../lib/supabase';
 import { JOB_STATUSES, type CVProfile } from '../types';
 import { draftSummaryFromCV } from '../lib/ai';
 import { getCVStats, type CVStats } from '../lib/analytics';
+import { useLiveRefresh } from '../../../lib/useLiveRefresh';
 import StatCard from '../../../components/ui/StatCard';
 
 /**
@@ -326,6 +327,13 @@ export default function CVDashboard() {
   };
 
   useEffect(() => { fetchProfiles(); fetchJobs(); }, [fetchProfiles, fetchJobs]);
+
+  // Live refresh: re-fetch when anything changes server-side — another tab,
+  // or an MCP client (e.g. Claude) editing CVs while the dashboard is open.
+  useLiveRefresh(
+    ['cv_profiles', 'cv_experience', 'cv_education', 'cv_skills', 'cv_certifications', 'cv_projects', 'cv_languages', 'job_applications'],
+    () => { fetchProfiles(); fetchJobs(); },
+  );
 
   useEffect(() => {
     if (profiles.length === 0) return;
