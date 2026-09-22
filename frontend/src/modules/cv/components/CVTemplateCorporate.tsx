@@ -82,7 +82,7 @@ export default function CVTemplateCorporate({
 
       {/* ── AREAS OF EXPERIENCE (relocated above Summary) ── */}
       {skills.length > 0 && (
-        <RuleSection title="Areas of Experience">
+        <RuleSection title="Skills">
           {/* Always render as grouped category rows — ATS-safe single column. */}
           {Object.entries(groupedSkills).map(([cat, items]) => (
             <div key={cat} style={{ marginBottom: '3px', fontSize: '9.5pt' }}>

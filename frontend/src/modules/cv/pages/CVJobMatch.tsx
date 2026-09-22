@@ -21,6 +21,7 @@ export default function CVJobMatch() {
   const [error, setError] = useState('');
   const [tailored, setTailored] = useState<TailoredCV | null>(null);
   const [copiedCL, setCopiedCL] = useState(false);
+  const [skillLevels, setSkillLevels] = useState<Record<string, CVSkill['proficiency']>>({});
 
   // Load the default CV profile and its sections
   const [profile, setProfile] = useState<CVProfile | null>(null);
@@ -61,6 +62,7 @@ export default function CVJobMatch() {
     setError('');
     try {
       const result = await tailorCVToJob(profile, experience, education, skills, jobText, settings, certifications, projects, languages);
+      setSkillLevels({});
       setTailored(result);
       refreshCredits();
       setStep('review');
@@ -123,6 +125,9 @@ export default function CVJobMatch() {
           start_date: exp.start_date,
           end_date: exp.end_date,
           is_current: exp.is_current,
+          description: exp.description,
+          gap_reason: exp.gap_reason,
+          departure_reason: exp.departure_reason,
           achievements: tailoredExp?.achievements || exp.achievements,
           technologies: tailoredExp?.technologies || exp.technologies,
           sort_order: exp.sort_order,
@@ -134,34 +139,36 @@ export default function CVJobMatch() {
         await supabase.from('cv_education').insert({
           profile_id: pid, institution: edu.institution, degree: edu.degree,
           field: edu.field, start_date: edu.start_date, end_date: edu.end_date,
-          grade: edu.grade, sort_order: edu.sort_order,
+          grade: edu.grade, location: edu.location, description: edu.description, sort_order: edu.sort_order,
         });
       }
 
-      // 4. Copy skills (with highlights promoted) + add new skills
+      // 4. Highlight relevant skills without changing proficiency; add only selected skills.
       const highlightSet = new Set(tailored.skills_to_highlight.map(s => s.toLowerCase()));
       for (const sk of skills) {
         await supabase.from('cv_skills').insert({
           profile_id: pid, name: sk.name, category: sk.category,
-          proficiency: highlightSet.has(sk.name.toLowerCase()) ? 'expert' : sk.proficiency,
+          proficiency: sk.proficiency,
+          years: sk.years,
           sort_order: highlightSet.has(sk.name.toLowerCase()) ? -1 : sk.sort_order, // highlighted first
         });
       }
       // Add new skills from job
       for (let i = 0; i < tailored.skills_to_add.length; i++) {
         const s = tailored.skills_to_add[i];
+        if (!skillLevels[s.name]) continue;
         await supabase.from('cv_skills').insert({
           profile_id: pid, name: s.name, category: s.category || 'Technical',
-          proficiency: s.proficiency || 'intermediate', sort_order: skills.length + i,
+          proficiency: skillLevels[s.name], sort_order: skills.length + i,
         });
       }
 
       // 5. Copy certs, projects, languages
       for (const c of certifications) {
-        await supabase.from('cv_certifications').insert({ profile_id: pid, name: c.name, issuer: c.issuer, date_obtained: c.date_obtained, sort_order: c.sort_order });
+        await supabase.from('cv_certifications').insert({ profile_id: pid, name: c.name, issuer: c.issuer, date_obtained: c.date_obtained, expiry_date: c.expiry_date, credential_id: c.credential_id, url: c.url, sort_order: c.sort_order });
       }
       for (const p of projects) {
-        await supabase.from('cv_projects').insert({ profile_id: pid, name: p.name, description: p.description, url: p.url, technologies: p.technologies, highlights: p.highlights, sort_order: p.sort_order });
+        await supabase.from('cv_projects').insert({ profile_id: pid, name: p.name, description: p.description, url: p.url, technologies: p.technologies, highlights: p.highlights, start_date: p.start_date, end_date: p.end_date, show_on_cv: p.show_on_cv, show_on_portfolio: p.show_on_portfolio, cv_description: p.cv_description, portfolio_description: p.portfolio_description, is_open_source: p.is_open_source, repo_url: p.repo_url, image_url: p.image_url, sort_order: p.sort_order });
       }
       for (const l of languages) {
         await supabase.from('cv_languages').insert({ profile_id: pid, language: l.language, proficiency: l.proficiency, sort_order: l.sort_order });
@@ -324,7 +331,7 @@ export default function CVJobMatch() {
                   </span>
                 </div>
                 <div className="text-[10px] text-[var(--color-text-secondary)]">
-                  ATS Match{tailored.original_score > 0 && ` (+${tailored.ats_score - tailored.original_score}pts)`}
+                  Estimated job match{tailored.original_score > 0 && ` (+${tailored.ats_score - tailored.original_score}pts)`}
                 </div>
               </div>
             </div>
@@ -375,6 +382,7 @@ export default function CVJobMatch() {
           {/* Tailored Summary */}
           <div className="neo-card p-4">
             <h3 className="text-sm font-semibold mb-2 flex items-center gap-2"><Target className="w-4 h-4 text-emerald-400" /> Tailored Summary</h3>
+            <p className="text-xs text-muted mb-2">Review every claim before saving. Match scores are AI estimates, not employer ATS results.</p>
             <p className="text-sm text-[var(--color-text-secondary)] leading-relaxed">{tailored.summary}</p>
           </div>
 
@@ -388,7 +396,7 @@ export default function CVJobMatch() {
                   <div key={i} className="mb-3 last:mb-0">
                     <div className="text-xs font-medium text-emerald-400 mb-1">{orig?.role} at {orig?.company}</div>
                     <ul className="text-xs text-[var(--color-text-secondary)] space-y-0.5 list-disc pl-4">
-                      {te.achievements.slice(0, 5).map((a, j) => <li key={j}>{a}</li>)}
+                      {te.achievements.map((a, j) => <li key={j}>{a}</li>)}
                     </ul>
                   </div>
                 );
@@ -400,7 +408,7 @@ export default function CVJobMatch() {
           <div className="grid grid-cols-2 gap-4">
             {tailored.skills_to_highlight.length > 0 && (
               <div className="neo-card p-4">
-                <h3 className="text-xs font-semibold mb-2 text-emerald-400">Skills Promoted to Expert</h3>
+                <h3 className="text-xs font-semibold mb-2 text-emerald-400">Skills Highlighted First</h3>
                 <div className="flex flex-wrap gap-1">
                   {tailored.skills_to_highlight.map((s, i) => (
                     <span key={i} className="text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md border-2 border-brand bg-brand/10 text-brand-light">{s}</span>
@@ -410,10 +418,23 @@ export default function CVJobMatch() {
             )}
             {tailored.skills_to_add.length > 0 && (
               <div className="neo-card p-4">
-                <h3 className="text-xs font-semibold mb-2 text-cyan-400">Skills Added</h3>
+                <h3 className="text-xs font-semibold mb-2 text-cyan-400">Suggested Skills — select your level to include</h3>
                 <div className="flex flex-wrap gap-1">
                   {tailored.skills_to_add.map((s, i) => (
-                    <span key={i} className="text-[10px] px-2 py-0.5 rounded bg-cyan-500/10 text-cyan-400">{s.name}</span>
+                    <label key={i} className="flex flex-col gap-1 text-xs text-cyan-400">
+                      {s.name}
+                      <select aria-label={`Proficiency for ${s.name}`} className="neo-input text-xs p-1" value={skillLevels[s.name] || ''} onChange={e => setSkillLevels(prev => {
+                        const next = { ...prev };
+                        if (e.target.value) next[s.name] = e.target.value as CVSkill['proficiency']; else delete next[s.name];
+                        return next;
+                      })}>
+                        <option value="">Do not add</option>
+                        <option value="beginner">Beginner</option>
+                        <option value="intermediate">Intermediate</option>
+                        <option value="advanced">Advanced</option>
+                        <option value="expert">Expert</option>
+                      </select>
+                    </label>
                   ))}
                 </div>
               </div>

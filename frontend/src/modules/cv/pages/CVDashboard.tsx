@@ -1,3 +1,4 @@
+import '../styles/studio.css';
 import { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
@@ -358,51 +359,29 @@ export default function CVDashboard() {
 
   if (profiles.length === 0) {
     return (
-      <div className="max-w-2xl mx-auto py-10">
-        <div className="neo-hero rounded-md py-16 px-8 text-center mb-8">
-          <div className="relative z-10">
-            <div className="w-20 h-20 rounded-md border-[3px] border-black bg-brand flex items-center justify-center mx-auto mb-5 shadow-md">
-              <FileUser className="w-9 h-9 text-white" />
+      <div className="cv-dashboard studio-empty">
+        <div className="studio-dashboard-hero mb-6">
+          <div>
+            <span className="studio-eyebrow">Your career, thoughtfully presented</span>
+            <h1>A CV that sounds like you.<br />At your very best.</h1>
+            <p>Turn your experience into a clear, confident story. Start fresh or bring your existing CV, then refine it one section at a time.</p>
+            <div className="studio-dashboard-actions">
+              <Link to="/cv/new" className="neo-btn neo-btn-primary px-5 py-3 text-sm gap-2"><Plus size={16} /> Create my CV <ArrowRight size={16} /></Link>
+              <Link to="/cv/import?source=file" className="neo-btn neo-btn-ghost px-5 py-3 text-sm gap-2"><Upload size={16} /> Import a CV</Link>
             </div>
-            <span className="neo-tag neo-tag-accent neo-tag-rotate mb-4 inline-block">Get started</span>
-            <h1 className="font-display text-4xl sm:text-5xl font-extrabold uppercase tracking-wide text-white mb-3">
-              CV Builder<br />&amp; Job Tracker
-            </h1>
-            <p className="text-sm text-muted max-w-lg mx-auto mb-8">
-              Build an ATS-compliant CV, tailor it to each job with AI, and track your whole pipeline in one place.
-            </p>
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <Link
-                to="/cv/new"
-                title={`Each new CV costs ${createCost} credit (charged when you save). Balance: ${credits}.`}
-                className="neo-btn neo-btn-primary px-6 py-3 text-sm inline-flex items-center gap-2"
-              >
-                <Plus className="w-4 h-4" /> Create from scratch <ArrowRight className="w-4 h-4" />
-                <span className="inline-flex items-center gap-0.5 text-[10px] opacity-80">
-                  <Coins className="w-3 h-3" />{createCost}
-                </span>
-              </Link>
-              <Link to="/cv/import?source=linkedin" className="neo-btn neo-btn-ghost px-5 py-3 text-sm inline-flex items-center gap-2">
-                <Linkedin className="w-4 h-4" /> Import from LinkedIn
-              </Link>
-              <Link to="/cv/import?source=github" className="neo-btn neo-btn-ghost px-5 py-3 text-sm inline-flex items-center gap-2">
-                <Github className="w-4 h-4" /> Import from GitHub
-              </Link>
-              <Link to="/cv/import?source=file" className="neo-btn neo-btn-ghost px-5 py-3 text-sm inline-flex items-center gap-2">
-                <Upload className="w-4 h-4" /> Upload file
-              </Link>
+            <div className="flex flex-wrap gap-4 mt-5 text-xs text-muted">
+              <Link to="/cv/import?source=linkedin" className="inline-flex items-center gap-1.5 hover:text-white"><Linkedin size={13} /> Import from LinkedIn</Link>
+              <Link to="/cv/import?source=github" className="inline-flex items-center gap-1.5 hover:text-white"><Github size={13} /> Import from GitHub</Link>
             </div>
-            <p className="text-[11px] text-subtle mt-3">
-              New CVs and duplicates cost {createCost} credit each when saved. Current balance: <span className="text-brand-light font-medium">{credits}</span>.
-            </p>
           </div>
+          <div className="studio-dashboard-paper" aria-hidden="true"><b /><span /><hr /><span /><span /><span /><hr /><span /><span /><span /></div>
         </div>
 
         {/* Feature hints */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
           {[
-            { icon: FileUser, title: 'ATS-ready CVs',    copy: 'Single-column PDF that every ATS can parse.' },
-            { icon: Sparkles,  title: 'AI tailoring',     copy: 'Match your CV to any job description in seconds.' },
+            { icon: FileUser, title: 'ATS-ready CVs',    copy: 'Clear headings, selectable text, and simple PDF layouts.' },
+            { icon: Sparkles,  title: 'AI tailoring',     copy: 'Refine your wording around real experience and the role you want.' },
             { icon: Briefcase, title: 'Job pipeline',     copy: 'Track every application from applied to offer.' },
           ].map(({ icon: Icon, title, copy }) => (
             <div key={title} className="neo-card p-5 animate-fade-in-up">
@@ -425,7 +404,7 @@ export default function CVDashboard() {
   })).filter(s => s.count > 0 || ['applied', 'interview', 'offer'].includes(s.value));
 
   return (
-    <div className="max-w-5xl mx-auto space-y-6 animate-fade-in-up">
+    <div className="cv-dashboard space-y-6">
 
       {/* Duplicate dialog — rendered here so it portals above all siblings. */}
       {duplicateTarget && (
@@ -441,28 +420,24 @@ export default function CVDashboard() {
         />
       )}
 
-      {/* ── Page header ── */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <h1 className="flex items-center gap-3 font-display text-2xl sm:text-3xl font-extrabold uppercase tracking-wide text-white">
-          <span className="inline-block w-2 h-7 bg-brand rounded-sm" />
-          CV &amp; Jobs
-        </h1>
+      <div className="studio-dashboard-hero">
+        <div>
+          <span className="studio-eyebrow">Your career workspace</span>
+          <h1>Make your next move.</h1>
+          <p>A stronger story starts with a thoughtful draft. Pick up your CV, refine the details, and make it relevant to your next opportunity.</p>
+          <div className="studio-dashboard-actions">
+            <Link to={`/cv/${(profiles.find(p => p.is_default) || profiles[0]).id}`} className="neo-btn neo-btn-primary px-5 py-3 text-sm gap-2"><Pencil size={15} /> Continue writing <ArrowRight size={15} /></Link>
+            <Link to="/cv/new" className="neo-btn neo-btn-ghost px-4 py-3 text-sm gap-2"><Plus size={15} /> New CV</Link>
+            <Link to="/cv/import?source=file" className="inline-flex items-center gap-2 text-xs text-muted hover:text-white px-2"><Upload size={14} /> Import</Link>
+          </div>
+        </div>
+        <div className="studio-dashboard-paper" aria-hidden="true"><b /><span /><hr /><span /><span /><span /><hr /><span /><span /><span /></div>
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div><h2 className="text-lg">Your application overview</h2><p className="text-xs text-muted mt-1">Keep your documents and opportunities in one place.</p></div>
         <div className="flex gap-2">
-          <Link to="/cv/import?source=linkedin" className="neo-btn neo-btn-ghost px-3 py-2.5 text-xs" title="Import from LinkedIn PDF">
-            <Linkedin className="w-4 h-4" />
-          </Link>
-          <Link to="/cv/import?source=github" className="neo-btn neo-btn-ghost px-3 py-2.5 text-xs" title="Import from GitHub">
-            <Github className="w-4 h-4" />
-          </Link>
-          <Link to="/cv/import?source=file" className="neo-btn neo-btn-ghost px-3 py-2.5 text-xs" title="Import CV from file">
-            <Upload className="w-4 h-4" />
-          </Link>
-          <Link to="/cv/match" className="neo-btn neo-btn-primary px-4 py-2.5 text-xs inline-flex items-center gap-2">
-            <Sparkles className="w-4 h-4" /> Tailor to Job
-          </Link>
-          <Link to="/cv/jobs/new" className="neo-btn neo-btn-ghost px-4 py-2.5 text-xs inline-flex items-center gap-2">
-            <Briefcase className="w-4 h-4" /> Track Job
-          </Link>
+          <Link to="/cv/match" className="neo-btn neo-btn-ghost px-4 py-2 text-xs gap-2"><Sparkles size={14} /> Tailor to a job</Link>
+          <Link to="/cv/jobs/new" className="neo-btn neo-btn-ghost px-4 py-2 text-xs gap-2"><Briefcase size={14} /> Track a job</Link>
         </div>
       </div>
 
@@ -503,10 +478,10 @@ export default function CVDashboard() {
             <span>My CVs</span>
             <Link
               to="/cv/new"
-              title={`New CV · ${createCost} credit (charged on save)`}
+              title="Create a new CV"
               className="neo-tag neo-tag-accent text-[10px]"
             >
-              + New version · {createCost}¢
+              + New CV
             </Link>
           </div>
           <div className="p-4 space-y-2">

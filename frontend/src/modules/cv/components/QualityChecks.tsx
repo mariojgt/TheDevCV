@@ -1,33 +1,9 @@
+import { checkCVReadiness } from '../lib/readiness';
 import { useMemo, useState } from 'react';
 import { CheckCircle, ChevronDown, ShieldCheck, Sparkles, Loader2, Coins } from 'lucide-react';
 import type { CVProfile, CVExperience, CVEducation, CVSkill, CareerStage } from '../types';
 
-/**
- * Client-side resume QA — zero AI, zero credit cost.
- *
- * Every check is traceable to a research-backed source (Harvard OCS, Bock/
- * Google, Jobscan, Rezi, Teal, Enhancv, Workday/Greenhouse ATS docs, Ladders
- * eye-tracking 2018, Built In/NYT 2024 hidden-text detection, GPTZero & Enhancv
- * 2026 AI-tell vocab). The findings use Rule IDs (e.g. BUL-002) that match the
- * research deliverable's Rule Summary Table.
- *
- * Checks implemented (by rule ID):
- *   BUL-001 — 3-5 bullets per role, up to 7 for current/senior
- *   BUL-002 — ≥60% of bullets contain a number
- *   BUL-003 — no weak openers / banned phrases
- *   BUL-004 — max 2 lines / ~150 chars per bullet
- *   BUL-005 — past tense for previous roles
- *   SUM-001 — summary 50-80 words (stage-aware), implied first person
- *   KW-001  — target role appears in summary / skills / a bullet
- *   KW-003  — 8-12 skills ideal (warn <5 or >20)
- *   KW-004  — no skill name repeated >3×
- *   AI-001  — banned AI-tell vocabulary
- *   AI-002  — hidden-character / prompt-injection detection
- *   EDU-001 — GPA only if ≥3.5 AND <3 yrs experience
- *   GAP-001 — employment gaps >6 months flagged
- *   CON-001 — no DOB/age/marital-status/nationality fields
- *   LEN-001 — page-count estimate vs stage-appropriate maximum
- */
+/** Local writing heuristics and completeness checks, not an ATS certification. */
 
 /**
  * A finding may be `fixable` — either by a single AI rewrite call (costs 1
@@ -74,11 +50,7 @@ const WEAK_OPENERS = [
   'participated in',
 ];
 
-/**
- * AI-tell vocabulary — words and phrases flagged by recruiter AI-detection
- * tools (GPTZero, Enhancv's 2026 red-flags list). Heavy use signals a CV was
- * produced by an LLM without human editing and can cause auto-rejection.
- */
+/** Generic wording worth reviewing; these words do not prove AI authorship. */
 const AI_TELL_WORDS = [
   'delve', 'realm', 'tapestry', 'pivotal', 'intricate',
   'foster', 'comprehensive', 'showcasing', 'adept',
@@ -234,11 +206,12 @@ export default function QualityChecks({
   };
 
   const findings: Finding[] = useMemo(() => {
-    const out: Finding[] = [];
+    const out: Finding[] = checkCVReadiness(profile, experience);
     const yearsExp = totalYearsExperience(experience);
 
     // ── Per-experience / per-bullet checks ────────────────────────
     experience.forEach((exp, xi) => {
+      if (exp.gap_reason) return; // Leave entries are not jobs requiring achievements.
       const label = `Experience · ${exp.company || `entry ${xi + 1}`}`;
 
       if (!exp.achievements?.length) {
@@ -308,12 +281,11 @@ export default function QualityChecks({
           if (!QUANTIFIER_RE.test(a)) {
             out.push({
               id: `exp-${xi}-b${bi}-no-metric`,
-              severity: 'warning',
-              title: 'No quantifiable metric',
-              detail: 'Add a number, percentage, currency, scale, or time to show measurable impact.',
+              severity: 'info',
+              title: 'Consider evidence of impact',
+              detail: 'If you know a real result, scale, or timeframe, add it. A clear qualitative contribution is valid; never guess a number.',
               location: where,
               snippet: a,
-              fix: { kind: 'rewrite-bullet', expIndex: xi, bulletIndex: bi, original: a },
             });
           }
 
@@ -346,8 +318,8 @@ export default function QualityChecks({
             out.push({
               id: `exp-${xi}-b${bi}-ai-tell`,
               severity: 'warning',
-              title: `AI-tell vocabulary: "${aiTellHits.join(', ')}"`,
-              detail: 'These words are flagged by recruiter AI-detection tools. Prefer concrete verbs and domain-specific nouns. Source: GPTZero, Enhancv 2026.',
+              title: `Consider more specific wording: "${aiTellHits.join(', ')}"`,
+              detail: 'These words can be vague. Prefer concrete verbs and domain-specific nouns. Source: GPTZero, Enhancv 2026.',
               location: where,
               snippet: a,
               fix: { kind: 'rewrite-bullet', expIndex: xi, bulletIndex: bi, original: a },
@@ -362,7 +334,7 @@ export default function QualityChecks({
                   id: `exp-${xi}-b${bi}-filler`,
                   severity: 'info',
                   title: `Unquantified filler: "${phrase}"`,
-                  detail: 'Filler phrases without a metric signal low substance. Either add a number or delete the phrase.',
+                  detail: 'Replace generic praise with a specific contribution. Include a number only if you can verify it.',
                   location: where,
                   snippet: a,
                 });
@@ -377,7 +349,7 @@ export default function QualityChecks({
               id: `exp-${xi}-b${bi}-hidden`,
               severity: 'error',
               title: 'Hidden / zero-width characters detected',
-              detail: 'Invisible characters (zero-width, RTL overrides) are flagged by modern ATS as tampering. Retype this bullet as plain text. Source: Built In, NYT 2024.',
+              detail: 'Check for accidental invisible formatting. Some characters are legitimate in non-English text; remove only unintended formatting.',
               location: where,
               snippet: a,
               fix: { kind: 'rewrite-bullet', expIndex: xi, bulletIndex: bi, original: a },
@@ -403,22 +375,7 @@ export default function QualityChecks({
       }
     });
 
-    // ── BUL-002: overall bullet metric density (target ≥60% quantified) ─
-    const allBullets = experience.flatMap((e) => e.achievements || []);
-    const totalBullets = allBullets.length;
-    const quantifiedBullets = allBullets.filter((b) => QUANTIFIER_RE.test(b)).length;
-    if (totalBullets >= 5) {
-      const pct = Math.round((quantifiedBullets / totalBullets) * 100);
-      if (pct < 60) {
-        out.push({
-          id: 'bullets-metric-density',
-          severity: 'warning',
-          title: `Only ${pct}% of bullets have a number`,
-          detail: '≥60% of achievement bullets should contain a metric (%, $, time, scale, count). Use ranges or before/after if exact numbers are unknown. Source: Teal, Bock/Google.',
-          location: 'Experience',
-        });
-      }
-    }
+    const allBullets = experience.filter(e => !e.gap_reason).flatMap(e => e.achievements || []);
 
     // ── SUM-001: summary length + CON-001: banned personal fields ────
     const summary = (profile.summary ?? '').trim();
@@ -464,8 +421,8 @@ export default function QualityChecks({
         out.push({
           id: 'summary-ai-tell',
           severity: 'warning',
-          title: `AI-tell vocabulary in summary: "${summaryAiTell.join(', ')}"`,
-          detail: 'These words are flagged by recruiter AI-detection tools. Rewrite the summary with concrete verbs and domain-specific nouns. Source: GPTZero, Enhancv 2026.',
+          title: `Consider more specific summary wording: "${summaryAiTell.join(', ')}"`,
+          detail: 'Consider concrete verbs and specific examples where these words add little meaning. Word choice alone does not indicate AI authorship.',
           location: 'Professional Summary',
           fix: { kind: 'rewrite-summary', original: summary },
         });
@@ -703,6 +660,7 @@ export default function QualityChecks({
       {/* ── Body: grouped by priority, collapsible sub-sections ─── */}
       {open && (
         <div className="border-t border-[var(--color-border)]">
+          <p className="px-4 py-3 text-xs text-muted">Writing and completeness checks, not an employer ATS score. Style tips are optional; verify facts and follow the application instructions.</p>
           {findings.length === 0 ? (
             <div className="p-6 text-center">
               <CheckCircle className="w-8 h-8 text-emerald-400 mx-auto mb-2" />
@@ -713,7 +671,7 @@ export default function QualityChecks({
             <div>
               <FindingGroup
                 title="Fix first"
-                blurb="These likely cause ATS rejection or recruiter red flags."
+                blurb="Completeness and clarity issues to review."
                 findings={errors}
                 tone="error"
                 defaultOpen
@@ -724,7 +682,7 @@ export default function QualityChecks({
               />
               <FindingGroup
                 title="Worth fixing"
-                blurb="Measurable impact on interview rate."
+                blurb="Suggestions to make your CV clearer."
                 findings={warnings}
                 tone="warning"
                 defaultOpen
@@ -905,5 +863,5 @@ function FindingGroup({
 
 /** Crude scoring: errors hurt most, warnings next, infos least. Bottoms out at 0. */
 function scoreFromFindings(errors: number, warnings: number, infos: number): number {
-  return Math.max(0, 100 - errors * 10 - warnings * 4 - infos * 1);
+  return Math.max(0, 100 - errors * 10 - warnings * 4);
 }

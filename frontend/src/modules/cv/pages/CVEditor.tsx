@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Save, Loader2, Plus, Trash2, Eye, Download, Brain, ChevronDown, Palette, Coins, Sparkles, FileText, Wand2, Target, Layers, CheckCircle2, GripVertical, RefreshCw, Braces, MessageSquare, Copy, ClipboardList, TrendingUp, AlertCircle, Globe, Info, Github } from 'lucide-react';
+import { ArrowRight, ArrowLeft, Save, Loader2, Plus, Trash2, Eye, Download, Brain, ChevronDown, Palette, Coins, Sparkles, FileText, Wand2, Target, Layers, CheckCircle2, GripVertical, RefreshCw, Braces, MessageSquare, Copy, ClipboardList, TrendingUp, AlertCircle, Globe, Info, Github } from 'lucide-react';
 import { useCV } from '../hooks/useCV';
 import { useApp } from '../../../contexts/AppContext';
 import { useToast } from '../../../components/ui/Toast';
@@ -16,29 +16,20 @@ import SharePanel from '../components/SharePanel';
 import PortfolioBuilder from '../components/PortfolioBuilder';
 import { toJSONResume, downloadJSONResume } from '../lib/jsonResume';
 import { toPlainText, downloadPlainText } from '../lib/plainText';
-import PlanBadge from '../../../components/PlanBadge';
+import CVPreview, { MobileCVPreview, type TemplateName } from '../components/CVPreview';
+import '../styles/studio.css';
 import { recordCVEvent } from '../lib/analytics';
-import CVTemplateClassic from '../components/CVTemplate';
 import RichTextEditor from '../components/RichTextEditor';
 import TagsInput from '../components/TagsInput';
-import CVTemplateModern from '../components/CVTemplateModern';
-import CVTemplateMinimal from '../components/CVTemplateMinimal';
-import CVTemplateProfessional from '../components/CVTemplateProfessional';
-import CVTemplateExecutive from '../components/CVTemplateExecutive';
-import CVTemplateCorporate from '../components/CVTemplateCorporate';
-import CVTemplateNeo from '../components/CVTemplateNeo';
-import CVTemplateNeoDark from '../components/CVTemplateNeoDark';
 import { supabase } from '../../../lib/supabase';
 import type { CVProfile, CVExperience, CVEducation, CVSkill, CVCertification, CVProject, CVLanguage, CVGapReason } from '../types';
 import { SKILL_CATEGORIES, PROFICIENCY_LEVELS, LANGUAGE_LEVELS, CAREER_STAGES, INDUSTRIES, GAP_PRESETS } from '../types';
 import { detectGaps, detectShortTenurePattern, layoffNote, formatMonths, formatMonthYear } from '../lib/gapAnalysis';
 
-type TemplateName = 'classic' | 'modern' | 'minimal' | 'professional' | 'executive' | 'corporate' | 'neo' | 'neo-dark';
-
 const TEMPLATES: { id: TemplateName; label: string; desc: string }[] = [
   { id: 'classic', label: 'Classic', desc: 'Single column, ATS-optimized' },
-  { id: 'modern', label: 'Modern', desc: 'Two-column with skills sidebar' },
-  { id: 'minimal', label: 'Minimal', desc: 'Elegant serif typography' },
+  { id: 'modern', label: 'Modern', desc: 'Clean typography with blue accents' },
+  { id: 'minimal', label: 'Minimal', desc: 'Quiet typography, generous whitespace' },
   { id: 'professional', label: 'Professional', desc: 'Labeled sections, recruiter-friendly' },
   { id: 'executive', label: 'Executive', desc: 'Navy serif with accent bar — senior roles' },
   { id: 'corporate', label: 'Corporate', desc: 'Blue double-rule sections — business-formal' },
@@ -48,12 +39,12 @@ const TEMPLATES: { id: TemplateName; label: string; desc: string }[] = [
 
 type EditorTab = 'edit' | 'design' | 'ai-review' | 'tailor' | 'portfolio';
 
-const TABS: { id: EditorTab; label: string; icon: typeof FileText }[] = [
-  { id: 'edit',      label: 'Edit',      icon: FileText },
-  { id: 'design',    label: 'Design',    icon: Palette },
-  { id: 'ai-review', label: 'AI Review', icon: Wand2 },
-  { id: 'tailor',    label: 'Tailor',    icon: Target },
-  { id: 'portfolio', label: 'Portfolio', icon: Globe },
+const TABS: { id: EditorTab; label: string; hint: string; icon: typeof FileText }[] = [
+  { id: 'edit', label: 'Write', hint: 'Your story & experience', icon: FileText },
+  { id: 'ai-review', label: 'Review', hint: 'Strengthen every detail', icon: Wand2 },
+  { id: 'tailor', label: 'Tailor', hint: 'Make it relevant', icon: Target },
+  { id: 'design', label: 'Design & export', hint: 'The finishing touches', icon: Palette },
+  { id: 'portfolio', label: 'Portfolio', hint: 'Show your work', icon: Globe },
 ];
 
 const AI_STEPS = [
@@ -509,16 +500,18 @@ function Section({
   const isOpen = open ?? internalOpen;
   const toggle = onToggle ?? (() => setInternalOpen(v => !v));
   return (
-    <div id={id} className="neo-card scroll-mt-3">
+    <div id={id} className="neo-card studio-section">
       <button
         type="button"
         onClick={toggle}
+        aria-expanded={isOpen}
+        aria-controls={id ? `${id}-content` : undefined}
         className="w-full flex items-center justify-between p-4 rounded-t-md hover:bg-surface/50 transition-colors"
       >
         <span className="text-xs font-extrabold uppercase tracking-wide text-white">{title} {count != null && <span className="text-muted font-normal normal-case">({count})</span>}</span>
         <ChevronDown className={`w-4 h-4 text-muted transition-transform ${isOpen ? 'rotate-180' : ''}`} />
       </button>
-      {isOpen && <div className="px-4 pb-4 border-t border-neo-border pt-4">{children}</div>}
+      {isOpen && <div id={id ? `${id}-content` : undefined} className="px-4 pb-4 border-t border-neo-border pt-4">{children}</div>}
     </div>
   );
 }
@@ -532,12 +525,10 @@ function Section({
  * Renders nothing when no analysis has been run yet (avoid empty-state noise).
  */
 function InlineJDDelta({
-  analysis, skills, onAddSkill, onAddAllSkills, onOpenTailor,
+  analysis, skills, onOpenTailor,
 }: {
   analysis: ATSGapAnalysis | null;
   skills: CVSkill[];
-  onAddSkill: (name: string) => void;
-  onAddAllSkills: () => void;
   onOpenTailor: () => void;
 }) {
   const [open, setOpen] = useState(true);
@@ -572,15 +563,13 @@ function InlineJDDelta({
               <div className="text-[10px] uppercase tracking-wider text-subtle">Missing keywords</div>
               <div className="flex flex-wrap gap-1">
                 {missingKw.map((k, i) => (
-                  <button
+                  <span
                     key={i}
-                    type="button"
-                    onClick={() => onAddSkill(k)}
-                    title={`Add "${k}" as a skill`}
+                    title="Missing evidence: add this only if you have the experience"
                     className="inline-flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded-sm border border-red-500 bg-red-500/10 text-red-400 hover:bg-brand/10 hover:text-brand-light hover:border-brand transition-colors"
                   >
-                    {k} <Plus className="w-2.5 h-2.5" />
-                  </button>
+                    {k}
+                  </span>
                 ))}
               </div>
             </>
@@ -593,10 +582,10 @@ function InlineJDDelta({
             {missingSkills.length > 0 ? (
               <button
                 type="button"
-                onClick={onAddAllSkills}
+                onClick={onOpenTailor}
                 className="inline-flex items-center gap-1 px-2 py-1 rounded-md border-2 border-brand bg-brand/10 text-brand-light text-[10px] font-bold uppercase tracking-wide hover:bg-brand/20 transition-colors"
               >
-                <Plus className="w-3 h-3" /> Add {missingSkills.length} missing as skills
+                <Plus className="w-3 h-3" /> Review {missingSkills.length} evidenced skills
               </button>
             ) : <span />}
             <button
@@ -752,9 +741,9 @@ function GapAnalysisPanel({
  * jumps to the matching section and shows a status dot: emerald (filled),
  * amber (partial), rose (empty). Sticky within the scrollable editor panel.
  */
-function SectionNav({ items }: { items: { id: string; label: string; state: 'empty' | 'partial' | 'full' }[] }) {
+function SectionNav({ items, onNavigate }: { onNavigate: (id: string) => void; items: { id: string; label: string; state: 'empty' | 'partial' | 'full' }[] }) {
   const dotColor = (s: 'empty' | 'partial' | 'full') =>
-    s === 'full' ? 'bg-brand' : s === 'partial' ? 'bg-accent' : 'bg-red-400/60';
+    s === 'full' ? 'bg-brand' : s === 'partial' ? 'bg-accent' : 'bg-slate-500';
   return (
     <div className="sticky top-0 z-20 -mx-0.5 px-0.5 py-2 bg-surface/95 border-b border-neo-border mb-1">
       <div className="flex items-center gap-1 overflow-x-auto no-scrollbar pb-1">
@@ -762,11 +751,8 @@ function SectionNav({ items }: { items: { id: string; label: string; state: 'emp
           <button
             key={it.id}
             type="button"
-            onClick={() => {
-              const el = document.getElementById(it.id);
-              if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
-            }}
-            title={`Jump to ${it.label}`}
+            onClick={() => onNavigate(it.id)}
+            title={`${it.label}: ${it.state === 'full' ? 'started' : it.state === 'partial' ? 'in progress' : 'not started'}`}
             className="group flex items-center gap-1.5 px-2.5 py-1.5 rounded-sm text-[10px] font-bold uppercase tracking-wide whitespace-nowrap bg-surface border-2 border-neo-border text-muted hover:text-white hover:border-brand transition-colors"
           >
             <span className={`w-1.5 h-1.5 rounded-full ${dotColor(it.state)}`} />
@@ -1475,6 +1461,7 @@ export default function CVEditor() {
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
   const [showPreview, setShowPreview] = useState(true);
+  const [showMobilePreview, setShowMobilePreview] = useState(false);
   const [template, setTemplate] = useState<TemplateName>('modern');
   const [scoring, setScoring] = useState(false);
   const [suggestions, setSuggestions] = useState<CVSuggestion[]>([]);
@@ -1484,6 +1471,9 @@ export default function CVEditor() {
   const [atsJobText, setAtsJobText] = useState('');
   const [drafting, setDrafting] = useState<'experience' | 'project' | null>(null);
   const [activeTab, setActiveTab] = useState<EditorTab>('edit');
+  useEffect(() => {
+    if (window.matchMedia('(max-width: 1023px)').matches) window.scrollTo({ top: 0 });
+  }, [activeTab]);
 
   // Accordion: only one Section is expanded at a time so the editor feels
   // like a focused single-step flow instead of a wall of fields. `null` means
@@ -1574,31 +1564,6 @@ export default function CVEditor() {
     }),
     [experience],
   );
-
-  // CV completeness: weighted checklist of the fields that matter for a strong
-  // CV. The % doubles as a gentle motivator and as a diagnostic the user can
-  // scan at a glance (which sections still need attention).
-  const completeness = useMemo(() => {
-    const checks: { ok: boolean; weight: number; label: string }[] = [
-      { ok: !!profile.full_name?.trim(),                           weight: 10, label: 'Full name' },
-      { ok: !!profile.email?.trim(),                               weight: 10, label: 'Email' },
-      { ok: !!profile.job_title?.trim(),                           weight: 5,  label: 'Job title' },
-      { ok: !!profile.phone?.trim(),                               weight: 5,  label: 'Phone' },
-      { ok: !!profile.location?.trim(),                            weight: 5,  label: 'Location' },
-      { ok: !!(profile.linkedin || profile.github || profile.website), weight: 5, label: 'Online link' },
-      { ok: (profile.summary || '').trim().length >= 100,          weight: 15, label: 'Summary (100+ chars)' },
-      { ok: !!profile.target_role?.trim(),                         weight: 5,  label: 'Target role' },
-      { ok: experience.length >= 1,                                weight: 20, label: 'At least 1 role' },
-      { ok: education.length >= 1,                                 weight: 10, label: 'Education entry' },
-      { ok: skills.length >= 5,                                    weight: 10, label: '5+ skills' },
-    ];
-    const total = checks.reduce((acc, c) => acc + c.weight, 0);
-    const earned = checks.reduce((acc, c) => acc + (c.ok ? c.weight : 0), 0);
-    return {
-      pct: Math.round((earned / total) * 100),
-      missing: checks.filter((c) => !c.ok).map((c) => c.label),
-    };
-  }, [profile, experience, education, skills]);
 
   useEffect(() => {
     const load = async () => {
@@ -1799,7 +1764,7 @@ export default function CVEditor() {
     }
     setScoring(true);
     try {
-      const result = await atsScore(profile as CVProfile, experience, education, skills, profile.target_role, settings);
+      const result = await atsScore(profile as CVProfile, experience, education, skills, profile.target_role, settings, certifications, cvProjects, languages);
       setProfile(p => ({ ...p, ats_score: result.score, keywords: result.missing_keywords }));
       refreshCredits();
     } catch (err) { handleAIError(err, 'ATS score'); }
@@ -1897,7 +1862,7 @@ export default function CVEditor() {
     }
     setAtsLoading(true);
     try {
-      const result = await atsScore(profile as CVProfile, experience, education, skills, atsJobText, settings);
+      const result = await atsScore(profile as CVProfile, experience, education, skills, atsJobText, settings, certifications, cvProjects, languages);
       setAtsAnalysis(result);
       setProfile(p => ({ ...p, ats_score: result.score }));
       refreshCredits();
@@ -2316,90 +2281,50 @@ export default function CVEditor() {
 
   const isEdit = id && id !== 'new';
 
-  const completeColor =
-    completeness.pct >= 80 ? 'bg-brand' :
-    completeness.pct >= 50 ? 'bg-accent'  :
-                             'bg-red-400';
-  const completeLabelColor =
-    completeness.pct >= 80 ? 'text-brand-light' :
-    completeness.pct >= 50 ? 'text-accent' :
-                             'text-red-400';
+  const navigateToSection = (sectionId: string) => {
+    setActiveTab('edit');
+    setActiveSection(sectionId);
+    requestAnimationFrame(() => {
+      const section = document.getElementById(sectionId);
+      section?.scrollIntoView({ behavior: window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'start' });
+      section?.querySelector('button')?.focus({ preventScroll: true });
+    });
+  };
+  const writingSteps = [
+    { id: 'sec-personal', label: 'Introduce yourself', detail: 'Add your name, role and contact details so employers can reach you.', done: !!(profile.full_name?.trim() && profile.email?.trim() && profile.job_title?.trim()) },
+    { id: 'sec-experience', label: 'Tell your story', detail: 'Describe a role and what you contributed. Internships and volunteer work count too.', done: experience.some(e => !e.gap_reason && e.achievements.some(a => a.trim())) },
+    { id: 'sec-skills', label: 'Show your strengths', detail: 'List the skills you can demonstrate, using clear, familiar names.', done: skills.length > 0 },
+    { id: 'sec-personal', label: 'Bring it together', detail: 'Write a short summary that connects your experience to the work you want next.', done: !!profile.summary?.trim() },
+  ];
+  const nextStep = writingSteps.find(step => !step.done);
+  const doneSteps = writingSteps.filter(step => step.done).length;
+  const previewData = { profile: profile as CVProfile, experience: renderedExperience, education, skills, certifications, projects: cvProjects, languages };
 
   return (
-    <div>
-      {/* ── POLISHED TOP BAR ─────────────────────────────────────────
-          Sticky app-style bar: back + CV name left, tabs centered,
-          Save / Download CTAs right. Completeness bar sits underneath
-          as a passive progress indicator. Spans the full viewport in
-          the chromeless FullScreenShell (resume.io-style). */}
-      <div className="sticky top-0 z-40 px-4 md:px-6 pt-3 pb-0 mb-4 bg-surface border-b-[3px] border-neo-border">
-        <div className="flex items-center justify-between gap-4 mb-3">
+    <div className="cv-studio">
+      {/* Document actions stay visible while writing; workflow navigation is separate. */}
+      <div className="studio-topbar">
+        <div className="studio-topbar-main">
           {/* Left: back + title */}
           <div className="flex items-center gap-3 min-w-0">
-            <Link to="/cv" className="neo-btn neo-btn-ghost p-2 shrink-0">
+            <Link to="/cv" aria-label="Back to my CVs" className="neo-btn neo-btn-ghost p-2 shrink-0">
               <ArrowLeft className="w-4 h-4" />
             </Link>
             <div className="min-w-0">
+              <div className="studio-eyebrow">CV Studio <span>/</span> Your workspace</div>
               <h1 className="text-sm font-extrabold uppercase tracking-wide truncate">
                 {profile.version_name || (isEdit ? 'Edit CV' : 'New CV')}
               </h1>
-              <div className="text-[11px] text-muted flex items-center gap-2">
-                <span className={completeLabelColor + ' font-semibold'}>{completeness.pct}%</span>
-                <span>complete</span>
-                {profile.ats_score != null && (
-                  <>
-                    <span className="text-subtle">·</span>
-                    <span className={`font-semibold ${profile.ats_score >= 80 ? 'text-brand-light' : profile.ats_score >= 60 ? 'text-accent' : 'text-red-400'}`}>
-                      ATS {profile.ats_score}%
-                    </span>
-                    <button
-                      type="button"
-                      onClick={handleATSScore}
-                      disabled={scoring || !profile.target_role || !hasCredits('ats_score')}
-                      title={
-                        !profile.target_role ? 'Set a target role to re-score'
-                        : !hasCredits('ats_score') ? `Re-score needs ${costOf('ats_score')} credits`
-                        : `Re-score (${costOf('ats_score')} credits)`
-                      }
-                      className="inline-flex items-center justify-center w-4 h-4 rounded text-subtle hover:text-brand-light transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
-                    >
-                      {scoring ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
-                    </button>
-                  </>
-                )}
-              </div>
+
             </div>
           </div>
 
-          {/* Center: pill tabs */}
-          <nav className="hidden md:flex items-center gap-1 p-1 rounded-md border-[3px] border-neo-border bg-surface">
-            {TABS.map((t) => {
-              const Icon = t.icon;
-              const active = activeTab === t.id;
-              return (
-                <button
-                  key={t.id}
-                  type="button"
-                  onClick={() => setActiveTab(t.id)}
-                  className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-sm text-xs font-bold uppercase tracking-wide transition-all ${
-                    active
-                      ? 'bg-brand text-white shadow'
-                      : 'text-muted hover:text-white hover:bg-surface-light'
-                  }`}
-                >
-                  <Icon className="w-3.5 h-3.5" />
-                  {t.label}
-                </button>
-              );
-            })}
-          </nav>
-
           {/* Right: preview + Save + Download */}
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="hidden sm:inline-flex"><PlanBadge /></div>
+          <div className="studio-topbar-actions">
             <button
-              onClick={() => setShowPreview(!showPreview)}
-              title={showPreview ? 'Hide preview' : 'Show preview'}
+              onClick={() => window.matchMedia('(max-width: 1023px)').matches ? setShowMobilePreview(true) : setShowPreview(!showPreview)}
+              title="Toggle CV preview"
+              aria-label="Toggle CV preview"
               className={`neo-btn neo-btn-ghost p-2 transition-colors ${showPreview ? 'border-brand text-brand-light bg-brand/10' : ''}`}
             >
               <Eye className="w-4 h-4" />
@@ -2428,53 +2353,35 @@ export default function CVEditor() {
             <button
               onClick={handleSave}
               disabled={saving || !profile.full_name?.trim() || (!isEdit && !hasCredits('create_cv'))}
-              title={!isEdit ? `Creating a new CV · ${costOf('create_cv')} credit (balance: ${credits})` : 'Save now (⌘S / Ctrl+S)'}
+              title={isEdit ? 'Save now (⌘S / Ctrl+S)' : 'Save your first draft'}
               className="neo-btn neo-btn-ghost px-4 py-2.5 text-xs inline-flex items-center gap-2"
             >
               {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
               <span>{saving ? 'Saving…' : 'Save'}</span>
-              {!isEdit && (
-                <span className="inline-flex items-center gap-0.5 text-[10px] text-brand-light/80"><Coins className="w-3 h-3" />{costOf('create_cv')}</span>
-              )}
+
             </button>
             <button
               onClick={handlePDF}
-              disabled={!hasCredits('export_pdf')}
-              title={`PDF export · ${costOf('export_pdf')} credit`}
+              disabled={!profile.full_name?.trim() || !hasCredits('export_pdf')}
+              title="Download your CV as a PDF"
               className="neo-btn neo-btn-primary px-4 py-2.5 text-xs inline-flex items-center gap-2"
             >
               <Download className="w-4 h-4" />
-              <span>Download</span>
-              <span className="inline-flex items-center gap-0.5 text-[10px] opacity-80"><Coins className="w-3 h-3" />{costOf('export_pdf')}</span>
+              <span>Export PDF</span>
+
             </button>
           </div>
         </div>
 
-        {/* Completeness progress rail */}
-        <div className="h-1 w-full rounded-full bg-surface-light overflow-hidden">
-          <div
-            className={`h-full ${completeColor} transition-all duration-500 ease-out`}
-            style={{ width: `${completeness.pct}%` }}
-          />
-        </div>
-
-        {/* Mobile tabs (below progress on small screens) */}
-        <nav className="flex md:hidden items-center gap-1 pt-2 pb-1 overflow-x-auto">
-          {TABS.map((t) => {
-            const Icon = t.icon;
-            const active = activeTab === t.id;
-            return (
-              <button
-                key={t.id}
-                type="button"
-                onClick={() => setActiveTab(t.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-sm text-xs font-bold uppercase tracking-wide whitespace-nowrap transition-all ${
-                  active ? 'bg-brand text-white' : 'text-muted hover:text-white'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />{t.label}
-              </button>
-            );
+        <nav className="studio-workflow" aria-label="CV workspace">
+          {TABS.map((tab, index) => {
+            const Icon = tab.icon;
+            return <button key={tab.id} type="button" aria-current={activeTab === tab.id ? 'step' : undefined}
+              onClick={() => setActiveTab(tab.id)} className={`studio-workflow-step ${activeTab === tab.id ? 'is-active' : ''}`}>
+              <span className="studio-step-icon"><Icon size={17} /></span>
+              <span><strong>{tab.label}</strong><small>{tab.hint}</small></span>
+              {index < 4 && <span className="studio-step-number">0{index + 1}</span>}
+            </button>;
           })}
         </nav>
       </div>
@@ -2488,37 +2395,32 @@ export default function CVEditor() {
       {/* The Portfolio tab owns its own iframe preview, so we suppress the
           CV PDF preview there and let the editor column take full width.
           That's handled inline on the preview conditionals below. */}
-      <div className="flex flex-col md:flex-row md:gap-4 px-4 md:px-6 max-w-400 mx-auto">
+      <div className={`studio-layout ${showPreview && activeTab !== 'portfolio' ? 'with-preview' : 'without-preview'}`}>
         {/* Editor panel */}
-        <div className={`w-full space-y-3 pb-28 md:overflow-y-auto ${(showPreview && activeTab !== 'portfolio') ? 'md:w-1/2 md:max-h-[calc(100vh-120px)]' : 'md:max-w-3xl md:mx-auto md:max-h-[calc(100vh-120px)]'} ${activeTab === 'portfolio' ? 'md:max-w-none' : ''}`}>
+        <div key={activeTab} className="studio-editor-panel">
+          <div className="studio-panel-heading">
+            <div><span className="studio-eyebrow">{activeTab === 'edit' ? 'Make a strong first impression' : 'A little care goes a long way'}</span>
+              <h2>{activeTab === 'edit' ? 'Your next chapter starts here.' : activeTab === 'ai-review' ? 'Good writing. Stronger evidence.' : activeTab === 'tailor' ? 'The right story for the role.' : activeTab === 'design' ? 'Make it yours.' : 'Let your work speak.'}</h2>
+            </div>
+          </div>
+
           {/* ═══ EDIT TAB ═════════════════════════════════════════════ */}
           {activeTab === 'edit' && (<>
+          <div className="studio-guide">
+            <div className="studio-guide-top"><span className="studio-eyebrow">{nextStep ? 'A good next step' : 'Your draft is taking shape'}</span><span>{doneSteps} of {writingSteps.length} foundations added</span></div>
+            <div className="studio-guide-body"><div><h3>{nextStep?.label || 'Ready for a second look?'}</h3><p>{nextStep?.detail || 'Review your wording, check the facts, and give each achievement a clear purpose.'}</p></div>
+              <button type="button" className="studio-guide-action" onClick={() => nextStep ? navigateToSection(nextStep.id) : setActiveTab('ai-review')} aria-label={nextStep ? `Continue: ${nextStep.label}` : 'Review my CV'}><ArrowRight size={20} /></button>
+            </div>
+            <div className="studio-foundations" aria-label="Writing progress">{writingSteps.map((step, i) => <span key={i} className={step.done ? 'is-done' : ''} title={`${step.label}: ${step.done ? 'added' : 'not yet added'}`} />)}</div>
+          </div>
+          {!settings?.ai_configured && <div className="studio-ai-note"><Sparkles size={16} /><span>Want a writing partner? <Link to="/settings">Connect AI in Settings</Link>. You can write and export without it.</span></div>}
           <InlineJDDelta
             analysis={atsAnalysis}
             skills={skills}
-            onAddSkill={(name) => {
-              const exists = skills.some(s => s.name.toLowerCase() === name.toLowerCase());
-              if (exists) return;
-              setSkills(prev => [...prev, { id: '', profile_id: '', name, category: 'Technical', proficiency: 'intermediate', years: null, sort_order: prev.length }]);
-            }}
-            onAddAllSkills={() => {
-              if (!atsAnalysis) return;
-              const existing = new Set(skills.map(s => s.name.toLowerCase()));
-              const toAdd = (atsAnalysis.skills_to_add || []).filter(n => !existing.has(n.toLowerCase()));
-              setSkills(prev => [
-                ...prev,
-                ...toAdd.map((name, i) => ({
-                  id: '', profile_id: '', name,
-                  category: 'Technical' as const,
-                  proficiency: 'intermediate' as const,
-                  years: null,
-                  sort_order: prev.length + i,
-                })),
-              ]);
-            }}
             onOpenTailor={() => setActiveTab('tailor')}
           />
           <SectionNav
+            onNavigate={navigateToSection}
             items={[
               { id: 'sec-personal',       label: 'Personal',      state:
                 (profile.full_name?.trim() && profile.email?.trim() && profile.job_title?.trim() && (profile.linkedin || profile.github || profile.website) && (profile.summary || '').trim().length >= 100)
@@ -2545,38 +2447,34 @@ export default function CVEditor() {
           {/* Personal Info */}
           <Section id="sec-personal" title="Personal Information" {...sectionProps('sec-personal')}>
             <div className="space-y-3">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <input type="text" value={profile.full_name || ''} onChange={e => setProfile(p => ({ ...p, full_name: e.target.value }))}
-                  placeholder="Full Name *" className="neo-input px-3 py-2.5 sm:col-span-2" />
-                <input type="text" value={profile.version_name || ''} onChange={e => setProfile(p => ({ ...p, version_name: e.target.value }))}
-                  placeholder="CV Version Name (e.g. Tech CV)" className="neo-input px-3 py-2.5" />
-                <input type="text" value={profile.job_title || ''} onChange={e => setProfile(p => ({ ...p, job_title: e.target.value }))}
-                  placeholder="Job Title" className="neo-input px-3 py-2.5" />
-                <input type="email" value={profile.email || ''} onChange={e => setProfile(p => ({ ...p, email: e.target.value }))}
-                  placeholder="Email" className="neo-input px-3 py-2.5" />
-                <input type="text" value={profile.phone || ''} onChange={e => setProfile(p => ({ ...p, phone: e.target.value }))}
-                  placeholder="Phone" className="neo-input px-3 py-2.5" />
-                <input type="text" value={profile.location || ''} onChange={e => setProfile(p => ({ ...p, location: e.target.value }))}
-                  placeholder="Location" className="neo-input px-3 py-2.5" />
-                <input type="text" value={profile.linkedin || ''} onChange={e => setProfile(p => ({ ...p, linkedin: e.target.value }))}
-                  placeholder="LinkedIn URL" className="neo-input px-3 py-2.5" />
-                <input type="text" value={profile.github || ''} onChange={e => setProfile(p => ({ ...p, github: e.target.value }))}
-                  placeholder="GitHub URL" className="neo-input px-3 py-2.5" />
-                <input type="text" value={profile.website || ''} onChange={e => setProfile(p => ({ ...p, website: e.target.value }))}
-                  placeholder="Website / Portfolio" className="neo-input px-3 py-2.5 sm:col-span-2" />
+              <p className="text-xs text-muted leading-relaxed">Start with the essentials. Use the name and contact details you want employers to see.</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                {([
+                  ['full_name', 'Full name', 'e.g. Alex Rivera', 'text', 'name'],
+                  ['version_name', 'Document name', 'e.g. Software engineering CV', 'text', 'off'],
+                  ['job_title', 'Professional title', 'e.g. Software Engineer', 'text', 'organization-title'],
+                  ['email', 'Email', 'you@example.com', 'email', 'email'],
+                  ['phone', 'Phone (optional)', '+44 7700 900000', 'tel', 'tel'],
+                  ['location', 'Location', 'City, country', 'text', 'address-level2'],
+                  ['linkedin', 'LinkedIn (optional)', 'linkedin.com/in/your-name', 'url', 'off'],
+                  ['github', 'GitHub (optional)', 'github.com/your-name', 'url', 'off'],
+                  ['website', 'Website (optional)', 'your-website.com', 'url', 'url'],
+                  ['target_role', 'Target role (optional)', 'The role you want next', 'text', 'off'],
+                ] as const).map(([field, label, placeholder, type, autoComplete]) => (
+                  <label key={field} className={`studio-field ${field === 'full_name' ? 'sm:col-span-2' : ''}`}>
+                    <span>{label}{field === 'full_name' && <span className="text-brand-light"> *</span>}</span>
+                    <input type={type} autoComplete={autoComplete} value={profile[field] || ''} onChange={e => setProfile(p => ({ ...p, [field]: e.target.value }))}
+                      placeholder={placeholder} required={field === 'full_name'} className="neo-input px-3 py-2.5" />
+                  </label>
+                ))}
               </div>
               <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="text-xs font-bold uppercase tracking-wide text-muted">Professional Summary</label>
-                  <input type="text" value={profile.target_role || ''} onChange={e => setProfile(p => ({ ...p, target_role: e.target.value }))}
-                    placeholder="Target role (for ATS scoring)"
-                    className="px-2 py-1 rounded bg-surface border-2 border-neo-border text-xs w-48" />
-                </div>
+                <div className="mb-2"><span className="text-xs font-semibold text-muted">Professional summary</span></div>
                 <RichTextEditor
                   mode="paragraph"
                   value={profile.summary || ''}
                   onChange={(v) => setProfile(p => ({ ...p, summary: v }))}
-                  placeholder="Write a compelling professional summary…"
+                  placeholder="What do you do well, and what experience shows it? Write a few clear sentences…"
                   minHeight={96}
                   ariaLabel="Professional summary"
                 />
@@ -2605,9 +2503,7 @@ export default function CVEditor() {
                         <>
                           <Sparkles className="w-3.5 h-3.5 text-brand-light" />
                           {(profile.summary || '').trim().length >= 30 ? 'Regenerate with AI' : 'Draft with AI'}
-                          <span className="inline-flex items-center gap-0.5 text-[10px] text-brand-light/80">
-                            <Coins className="w-3 h-3" />{costOf('ai_improve')}
-                          </span>
+
                         </>
                       )}
                     </button>
@@ -2629,9 +2525,7 @@ export default function CVEditor() {
                         <>
                           <Wand2 className="w-3.5 h-3.5 text-brand-light" />
                           Beautify
-                          <span className="inline-flex items-center gap-0.5 text-[10px] text-brand-light/80">
-                            <Coins className="w-3 h-3" />{costOf('ai_improve')}
-                          </span>
+
                         </>
                       )}
                     </button>
@@ -2639,11 +2533,11 @@ export default function CVEditor() {
                   <span className="text-[10px] text-subtle">Draft generates from scratch · Beautify polishes what you wrote.</span>
                 </div>
                 <FieldTip>
-                  <strong>50–80 words, 3–5 sentences.</strong> Front-load years + role + top 3 skills. Recruiters spend ~6 seconds on first scan — anything past 80 words goes unread. <em>Source: Ladders eye-tracking 2018.</em>
+                  <strong>A few specific sentences are enough.</strong> Introduce your strengths, relevant experience, and the contribution you want to make. Use only facts you can support.
                 </FieldTip>
                 {profile.target_role && (
                   <FieldTip>
-                    Weave your target role <strong>verbatim</strong> into the summary. Exact-title match = <strong>10.6× interview rate</strong>. <em>Source: Jobscan.</em>
+                    Connect your experience to <strong>{profile.target_role}</strong> naturally. Keep past job titles and qualifications accurate.
                   </FieldTip>
                 )}
               </div>
@@ -2651,7 +2545,7 @@ export default function CVEditor() {
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 border-t border-neo-border">
                 <div>
                   <label className="text-[10px] uppercase tracking-wider text-muted mb-1 block">Career stage</label>
-                  <select value={profile.career_stage || ''} onChange={e => setProfile(p => ({ ...p, career_stage: (e.target.value || null) as any }))}
+                  <select aria-label="Career stage" value={profile.career_stage || ''} onChange={e => setProfile(p => ({ ...p, career_stage: (e.target.value || null) as any }))}
                     className="w-full neo-input px-2 py-1.5 text-sm">
                     <option value="">Unspecified</option>
                     {CAREER_STAGES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -2664,7 +2558,7 @@ export default function CVEditor() {
                 </div>
                 <div>
                   <label className="text-[10px] uppercase tracking-wider text-muted mb-1 block">Industry</label>
-                  <select value={profile.industry || ''} onChange={e => setProfile(p => ({ ...p, industry: e.target.value || null }))}
+                  <select aria-label="Industry" value={profile.industry || ''} onChange={e => setProfile(p => ({ ...p, industry: e.target.value || null }))}
                     className="w-full neo-input px-2 py-1.5 text-sm">
                     <option value="">Unspecified</option>
                     {INDUSTRIES.map(i => <option key={i.value} value={i.value}>{i.label}</option>)}
@@ -2701,8 +2595,8 @@ export default function CVEditor() {
                   title={hasCredits('ats_score') ? `ATS score · ${costOf('ats_score')} credits` : `Not enough credits (need ${costOf('ats_score')})`}
                   className="neo-btn neo-btn-primary px-3 py-1.5 text-xs inline-flex items-center gap-1.5 disabled:opacity-50">
                   {scoring ? <Loader2 className="w-3 h-3 animate-spin" /> : <Brain className="w-3 h-3" />}
-                  {scoring ? 'Scoring…' : 'Check ATS Score'}
-                  <span className="inline-flex items-center gap-0.5 text-[10px] opacity-80"><Coins className="w-3 h-3" />{costOf('ats_score')}</span>
+                  {scoring ? 'Scoring…' : 'Estimate CV Alignment'}
+
                 </button>
               )}
             </div>
@@ -3025,9 +2919,7 @@ export default function CVEditor() {
                   ) : (
                     <>
                       <Sparkles className="w-3.5 h-3.5" /> Import
-                      <span className="inline-flex items-center gap-0.5 text-[10px] text-brand-light/80">
-                        <Coins className="w-3 h-3" />{costOf('ai_improve')}
-                      </span>
+
                     </>
                   )}
                 </button>
@@ -3185,9 +3077,7 @@ export default function CVEditor() {
                         ) : (
                           <>
                             <Wand2 className="w-3 h-3 text-brand-light" /> Beautify
-                            <span className="inline-flex items-center gap-0.5 text-[10px] text-brand-light/80">
-                              <Coins className="w-3 h-3" />{costOf('ai_improve')}
-                            </span>
+
                           </>
                         )}
                       </button>
@@ -3301,7 +3191,7 @@ export default function CVEditor() {
                   <div className="w-8 h-8 border-[3px] border-neo-border bg-brand/20 rounded-sm flex items-center justify-center shrink-0 text-brand-light"><Layers className="w-4 h-4" /></div>
                   <div>
                     <h2 className="text-xs font-extrabold uppercase tracking-wide text-white">Choose a template</h2>
-                    <p className="text-xs text-muted mt-0.5">All templates are ATS-safe — the same content renders in any style.</p>
+                    <p className="text-xs text-muted mt-0.5">All PDF exports use selectable text and a single column. Follow the employer’s requested file format.</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -3312,12 +3202,14 @@ export default function CVEditor() {
                         key={t.id}
                         type="button"
                         onClick={() => setTemplate(t.id)}
-                        className={`text-left p-3 rounded-md border-[3px] transition-all ${
+                        aria-pressed={active}
+                        className={`studio-template-option text-left p-3 rounded-md border-[3px] transition-all ${
                           active
                             ? 'border-brand bg-brand/10 shadow'
                             : 'border-neo-border bg-surface hover:border-brand/60'
                         }`}
                       >
+                        <div className={`studio-template-swatch template-${t.id}`} aria-hidden="true"><b /><i /><hr /><span /><span /><span /><hr /><span /><span /></div>
                         <div className="flex items-center justify-between mb-1">
                           <span className="text-xs font-extrabold uppercase tracking-wide">{t.label}</span>
                           {active && <CheckCircle2 className="w-4 h-4 text-brand-light" />}
@@ -3361,9 +3253,9 @@ export default function CVEditor() {
                 <div className="flex items-start gap-3 mb-3">
                   <div className="w-8 h-8 border-[3px] border-neo-border bg-brand/20 rounded-sm flex items-center justify-center shrink-0 text-brand-light"><FileText className="w-4 h-4" /></div>
                   <div className="flex-1">
-                    <h3 className="text-xs font-extrabold uppercase tracking-wide text-white">Export as plain text</h3>
+                    <h3 className="text-xs font-extrabold uppercase tracking-wide text-white">Review & export plain text</h3>
                     <p className="text-xs text-muted mt-0.5">
-                      Pure ASCII .txt — paste into free ATS scanners (Jobscan, Resume Worded) to audit exactly what real parsers extract from your CV.
+                      UTF-8 text with standard headings. Review the content below before downloading; each employer’s PDF parser may read the PDF differently.
                     </p>
                   </div>
                 </div>
@@ -3381,6 +3273,10 @@ export default function CVEditor() {
                 >
                   <Download className="w-4 h-4" /> Download resume.txt
                 </button>
+                <details className="mt-3">
+                  <summary className="cursor-pointer text-xs font-bold text-brand-light">Preview CV text and reading order</summary>
+                  <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap rounded-md border-2 border-neo-border bg-surface p-3 text-xs text-muted">{toPlainText(profile as CVProfile, renderedExperience, education, skills, certifications, cvProjects, languages)}</pre>
+                </details>
               </div>
             </div>
           )}
@@ -3411,7 +3307,7 @@ export default function CVEditor() {
               analysis={atsAnalysis}
               loading={atsLoading}
               jobText={atsJobText}
-              onJobTextChange={setAtsJobText}
+              onJobTextChange={text => { setAtsJobText(text); setAtsAnalysis(null); }}
               onAnalyze={handleATSAnalysis}
               onApplySummary={(s) => setProfile(p => ({ ...p, summary: s }))}
               onApplyAchievement={(expId, current, suggested) => {
@@ -3432,9 +3328,6 @@ export default function CVEditor() {
                   proficiency: 'intermediate' as const, years: null, sort_order: prev.length + i,
                 }))]);
               }}
-              onApplyAll={() => {
-                // Score gets updated via the individual handlers above
-              }}
             />
 
             {/* ── Cover Letter Generator ───────────────────────────── */}
@@ -3447,9 +3340,7 @@ export default function CVEditor() {
                   <h2 className="text-xs font-extrabold uppercase tracking-wide text-white">Cover Letter</h2>
                   <p className="text-xs text-muted mt-0.5">Tailored to the job description above. Add a company and role for a sharper letter.</p>
                 </div>
-                <span className="inline-flex items-center gap-0.5 text-[10px] text-muted shrink-0">
-                  <Coins className="w-3 h-3" />{costOf('ai_improve')} credit
-                </span>
+
               </div>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
@@ -3512,9 +3403,7 @@ export default function CVEditor() {
                   <h2 className="text-xs font-extrabold uppercase tracking-wide text-white">Interview Prep</h2>
                   <p className="text-xs text-muted mt-0.5">10 targeted questions — behavioural, technical, and situational — matched to this exact job.</p>
                 </div>
-                <span className="inline-flex items-center gap-0.5 text-[10px] text-muted shrink-0">
-                  <Coins className="w-3 h-3" />{costOf('ai_improve')} credit
-                </span>
+
               </div>
 
               <button
@@ -3567,119 +3456,9 @@ export default function CVEditor() {
           )}
         </div>
 
-        {/* ── Floating "Ask AI writer" pill — always available, opens AI Review ── */}
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTab('ai-review');
-            if (!suggestions.length && !optimizing && hasCredits('ai_optimize')) {
-              handleOptimize();
-            }
-          }}
-          disabled={optimizing}
-          title={`AI review · ${costOf('ai_optimize')} credits`}
-          className={`fixed bottom-6 left-1/2 -translate-x-1/2 z-30 neo-btn neo-btn-accent px-5 py-2.5 text-sm inline-flex items-center gap-2 disabled:opacity-60 ${showPreview ? 'md:left-[25%]' : ''}`}
-        >
-          {optimizing ? (
-            <Loader2 className="w-4 h-4 text-accent animate-spin" />
-          ) : (
-            <Sparkles className="w-4 h-4 text-accent" />
-          )}
-          <span className="text-sm font-bold uppercase tracking-wide">{optimizing ? 'Thinking…' : 'Ask AI writer'}</span>
-          <span className="inline-flex items-center gap-0.5 text-[10px] text-accent/80">
-            <Coins className="w-3 h-3" />{costOf('ai_optimize')}
-          </span>
-        </button>
-
-        {/* Inline Live Preview — desktop only (mobile uses the overlay below). */}
-        {showPreview && activeTab !== 'portfolio' && (
-          <div className="hidden md:block md:w-1/2 md:sticky md:top-4" style={{ maxHeight: 'calc(100vh - 120px)', overflowY: 'auto' }}>
-            <div className="bg-white rounded-lg shadow-xl overflow-hidden" style={{ transform: 'scale(0.72)', transformOrigin: 'top center' }}>
-              {template === 'modern' ? (
-                <CVTemplateModern
-                  profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : template === 'minimal' ? (
-                <CVTemplateMinimal
-                  profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : template === 'professional' ? (
-                <CVTemplateProfessional
-                  profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : template === 'executive' ? (
-                <CVTemplateExecutive
-                  profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : template === 'corporate' ? (
-                <CVTemplateCorporate
-                  profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : template === 'neo' ? (
-                <CVTemplateNeo
-                  profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : template === 'neo-dark' ? (
-                <CVTemplateNeoDark
-                  profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : (
-                <CVTemplateClassic
-                  profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              )}
-            </div>
-          </div>
-        )}
+        {showPreview && activeTab !== 'portfolio' && <aside className="studio-desktop-preview"><CVPreview template={template} data={previewData} /></aside>}
       </div>
-
-      {/* Mobile-only full-screen preview overlay. Hidden at md+ where the
-          inline preview takes over. Scrolls the whole viewport and offers a
-          clear dismiss control; zoom is constrained so the CV is readable
-          without a magnifier. */}
-      {showPreview && activeTab !== 'portfolio' && (
-        <div className="md:hidden fixed inset-0 z-50 bg-surface overflow-y-auto">
-          <div className="sticky top-0 z-10 flex items-center justify-between px-4 py-3 bg-surface border-b-[3px] border-neo-border">
-            <span className="text-sm font-extrabold uppercase tracking-wide">Preview</span>
-            <button
-              type="button"
-              onClick={() => setShowPreview(false)}
-              className="neo-btn neo-btn-ghost px-3 py-1.5 text-xs"
-            >
-              Close
-            </button>
-          </div>
-          <div className="p-4">
-            <div className="bg-white rounded-lg shadow-xl overflow-hidden" style={{ transform: 'scale(0.48)', transformOrigin: 'top left', width: '208%' }}>
-              {template === 'modern' ? (
-                <CVTemplateModern profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : template === 'minimal' ? (
-                <CVTemplateMinimal profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : template === 'professional' ? (
-                <CVTemplateProfessional profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : template === 'executive' ? (
-                <CVTemplateExecutive profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : template === 'corporate' ? (
-                <CVTemplateCorporate profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : template === 'neo' ? (
-                <CVTemplateNeo profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : template === 'neo-dark' ? (
-                <CVTemplateNeoDark profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              ) : (
-                <CVTemplateClassic profile={profile as CVProfile} experience={renderedExperience} education={education}
-                  skills={skills} certifications={certifications} projects={cvProjects} languages={languages} />
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+      {showMobilePreview && <MobileCVPreview template={template} data={previewData} onClose={() => setShowMobilePreview(false)} />}
 
       {/* AI Writing animation overlay */}
       <AIWritingOverlay visible={optimizing} />

@@ -72,7 +72,7 @@ export default function CVTemplateProfessional({
 
       {/* ── AREAS OF EXPERIENCE (relocated above Profile) ── */}
       {skills.length > 0 && (
-        <LabeledSection label="Areas of Experience">
+        <LabeledSection label="Skills">
           {Object.entries(groupedSkills).map(([cat, items]) => (
             <div key={cat} style={{ marginBottom: '3px', fontSize: '9.5pt' }}>
               <strong style={{ color: TEXT }}>{cat}:</strong>{' '}

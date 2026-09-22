@@ -4,12 +4,8 @@ import type {
 } from '../types';
 import { mdToPlain } from './markdown';
 
-/**
- * Plain-text (.txt) ATS-safe export — pure ASCII, no tables, no Unicode
- * bullets. Purpose is validation: users can paste the output into free
- * scanners (Jobscan, Resume Worded) to see exactly what a real ATS parser
- * extracts, independent of our in-app ATS score.
- */
+/** UTF-8 text export for reviewing content and reading order.
+ * This is not a simulation of an employer's PDF parser. */
 
 function formatDateRange(
   start: string | null | undefined,
@@ -48,10 +44,9 @@ export function toPlainText(
   if (profile.github)    lines.push(`GitHub: ${profile.github}`);
   if (profile.portfolio) lines.push(`Portfolio: ${profile.portfolio}`);
 
-  // Areas of Experience (formerly "Skills") — moved above the Summary so an
-  // ATS pasting the .txt sees domain keywords before marketing prose.
+  // Match the PDF’s Skills heading and section order.
   if (skills.length) {
-    pushSection(lines, 'Areas of Experience');
+    pushSection(lines, 'Skills');
     const byCategory = new Map<string, string[]>();
     skills.forEach((s) => {
       const list = byCategory.get(s.category) ?? [];
@@ -69,7 +64,7 @@ export function toPlainText(
   }
 
   if (experience.length) {
-    pushSection(lines, 'Experience');
+    pushSection(lines, 'Work Experience');
     experience.forEach((e) => {
       lines.push('');
       lines.push(`${e.role} - ${e.company}`);
@@ -111,16 +106,17 @@ export function toPlainText(
     });
   }
 
-  if (projects.length) {
+  const visibleProjects = projects.filter(p => p.show_on_cv !== false);
+  if (visibleProjects.length) {
     pushSection(lines, 'Projects');
-    projects.forEach((p) => {
+    visibleProjects.forEach((p) => {
       lines.push('');
       lines.push(p.url ? `${p.name} - ${p.url}` : p.name);
       const range = formatDateRange(p.start_date, p.end_date);
       if (range) lines.push(range);
       const projDesc = (p.cv_description?.trim() || p.description?.trim()) || '';
       if (projDesc) lines.push(mdToPlain(projDesc).trim());
-      p.highlights.forEach((h) => { if (h.trim()) lines.push(`- ${h.trim()}`); });
+      p.highlights.forEach((h) => { const plain = mdToPlain(h).trim(); if (plain) lines.push(`- ${plain}`); });
       if (p.technologies.length) lines.push(`Technologies: ${p.technologies.join(', ')}`);
     });
   }

@@ -70,7 +70,7 @@ export default function CVTemplate({
       {/* ── AREAS OF EXPERIENCE (relocated above Summary) ──── */}
       {skills.length > 0 && (
         <div style={{ marginBottom: '12px' }}>
-          <SectionTitle>Areas of Experience</SectionTitle>
+          <SectionTitle>Skills</SectionTitle>
           {Object.entries(groupedSkills).map(([category, items]) => (
             <div key={category} style={{ marginBottom: '2px', fontSize: '9pt' }}>
               <strong style={{ color: '#1a1a1a' }}>{category}:</strong>{' '}

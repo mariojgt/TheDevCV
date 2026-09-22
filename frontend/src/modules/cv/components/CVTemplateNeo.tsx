@@ -98,7 +98,7 @@ export default function CVTemplateNeo({
 
         {/* ── AREAS OF EXPERIENCE (relocated above Summary) ── */}
         {skills.length > 0 && (
-          <NeoSection title="Areas of Experience">
+          <NeoSection title="Skills">
             {Object.entries(groupedSkills).map(([cat, items]) => (
               <div key={cat} style={{ marginBottom: '3px', fontSize: '9.5pt' }}>
                 <span style={{ fontWeight: 800, color: TEXT }}>{cat}: </span>

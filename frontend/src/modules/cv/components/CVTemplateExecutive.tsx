@@ -87,7 +87,7 @@ export default function CVTemplateExecutive({
 
       {/* ── AREAS OF EXPERIENCE (relocated above Summary) ── */}
       {skills.length > 0 && (
-        <SerifSection title="Areas of Experience">
+        <SerifSection title="Skills">
           {Object.entries(groupedSkills).map(([cat, items]) => (
             <div key={cat} style={{ marginBottom: '4px', fontSize: '10pt' }}>
               <strong style={{ color: ACCENT }}>{cat}:</strong>{' '}

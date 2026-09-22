@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Target, Loader2, Check, AlertTriangle, X, ChevronDown, Sparkles, Plus, RefreshCw } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Target, Loader2, Check, ChevronDown } from 'lucide-react';
 import type { ATSGapAnalysis } from '../lib/ai';
 
 const severityColors = {
@@ -19,7 +19,6 @@ export default function ATSAnalysis({
   onApplySummary,
   onApplyAchievement,
   onAddSkills,
-  onApplyAll,
 }: {
   analysis: ATSGapAnalysis | null;
   loading: boolean;
@@ -29,10 +28,12 @@ export default function ATSAnalysis({
   onApplySummary: (summary: string) => void;
   onApplyAchievement: (expId: string, current: string, suggested: string) => void;
   onAddSkills: (skills: string[]) => void;
-  onApplyAll: () => void;
 }) {
   const [open, setOpen] = useState(true);
   const [applied, setApplied] = useState<Set<string>>(new Set());
+
+  const [confirmedSkills, setConfirmedSkills] = useState<Set<string>>(new Set());
+  useEffect(() => { setApplied(new Set()); setConfirmedSkills(new Set()); }, [analysis]);
 
   const markApplied = (key: string) => setApplied(prev => new Set([...prev, key]));
 
@@ -41,7 +42,7 @@ export default function ATSAnalysis({
       <button type="button" onClick={() => setOpen(!open)}
         className="w-full flex items-center gap-2 p-4 hover:bg-surface-light transition-colors">
         <Target className="w-5 h-5 text-brand-light shrink-0" />
-        <span className="text-xs font-extrabold uppercase tracking-wide text-white flex-1 text-left">ATS Gap Analysis</span>
+        <span className="text-xs font-extrabold uppercase tracking-wide text-white flex-1 text-left">Job Alignment Review</span>
         {analysis && (
           <span className={`text-xs font-bold px-2 py-0.5 rounded-sm mr-2 ${analysis.score >= 80 ? 'bg-brand/10 text-brand-light' : analysis.score >= 60 ? 'bg-accent/10 text-accent' : 'bg-red-500/10 text-red-400'}`}>
             {analysis.score}%
@@ -54,21 +55,22 @@ export default function ATSAnalysis({
         <div className="px-4 pb-4 border-t-[3px] border-neo-border pt-4 space-y-3">
           {/* Job description input */}
           <div>
-            <label className="text-xs font-bold uppercase tracking-wider text-muted mb-1 block">Paste job description or URL</label>
-            <textarea value={jobText} onChange={e => onJobTextChange(e.target.value)}
-              rows={4} placeholder="Paste the full job description here to get a detailed ATS gap analysis with a path to 100% match…"
+            <label className="text-xs font-bold uppercase tracking-wider text-muted mb-1 block">Paste the full job description</label>
+            <textarea disabled={loading} value={jobText} onChange={e => onJobTextChange(e.target.value)}
+              rows={4} placeholder="Paste the full job description here to get a detailed ATS gap analysis and review evidence-based improvements…"
               className="neo-input px-3 py-2 text-xs resize-none" />
           </div>
 
           <button onClick={onAnalyze} disabled={loading || !jobText.trim()}
             className="neo-btn neo-btn-primary w-full py-2.5 text-sm inline-flex items-center justify-center gap-2">
             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}
-            {loading ? 'Analyzing…' : analysis ? 'Re-analyze' : 'Analyze ATS Match'}
+            {loading ? 'Analyzing…' : analysis ? 'Re-analyze' : 'Review Job Alignment'}
           </button>
 
           {/* Results */}
           {analysis && !loading && (
             <div className="space-y-3 pt-2">
+              <p className="text-xs text-muted">AI estimate from the CV at the time of analysis, not an employer’s ATS score or a guarantee. Review every suggested claim and re-analyze after editing.</p>
               {/* Score + Keywords */}
               <div className="flex items-center gap-3">
                 <div className={`font-display text-3xl font-extrabold ${analysis.score >= 80 ? 'text-brand-light' : analysis.score >= 60 ? 'text-accent' : 'text-red-400'}`}>
@@ -149,13 +151,20 @@ export default function ATSAnalysis({
                 {analysis.skills_to_add.length > 0 && !applied.has('skills') && (
                   <div className="p-2.5 rounded-md border-2 border-neo-border bg-surface-light">
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-extrabold uppercase tracking-wide text-white">Add {analysis.skills_to_add.length} Missing Skills</span>
-                      <button onClick={() => { onAddSkills(analysis.skills_to_add); markApplied('skills'); }}
-                        className="neo-btn neo-btn-primary text-[10px] px-2 py-0.5">Add All</button>
+                      <span className="text-xs font-extrabold uppercase tracking-wide text-white">Skills evidenced in your CV</span>
+                      <button disabled={confirmedSkills.size === 0} onClick={() => { onAddSkills([...confirmedSkills]); markApplied('skills'); }}
+                        className="neo-btn neo-btn-primary text-[10px] px-2 py-0.5">Add selected</button>
                     </div>
-                    <div className="flex flex-wrap gap-1">
-                      {analysis.skills_to_add.map((s, i) => (
-                        <span key={i} className="text-[9px] px-1.5 py-0.5 rounded-sm border border-neo-border bg-surface text-muted">{s}</span>
+                    <p className="text-[11px] text-muted mb-2">Select only skills you can demonstrate. Check your proficiency in the Skills editor after adding.</p>
+                    <div className="flex flex-wrap gap-2">
+                      {analysis.skills_to_add.map((s) => (
+                        <label key={s} className="flex items-center gap-1 text-xs text-muted">
+                          <input type="checkbox" checked={confirmedSkills.has(s)} onChange={e => setConfirmedSkills(prev => {
+                            const next = new Set(prev);
+                            if (e.target.checked) next.add(s); else next.delete(s);
+                            return next;
+                          })} />{s}
+                        </label>
                       ))}
                     </div>
                   </div>
@@ -172,8 +181,8 @@ export default function ATSAnalysis({
                       );
                       return (
                         <div key={i} className="mb-2 p-2 rounded-md border-2 border-neo-border bg-surface-light">
-                          <div className="text-[9px] text-red-400 line-through mb-1">{a.current?.slice(0, 120)}</div>
-                          <div className="text-[9px] text-brand-light mb-1">{a.suggested?.slice(0, 120)}</div>
+                          <div className="text-[9px] text-red-400 line-through mb-1">{a.current}</div>
+                          <div className="text-[9px] text-brand-light mb-1">{a.suggested}</div>
                           <button onClick={() => { onApplyAchievement(a.experience_id, a.current, a.suggested); markApplied(key); }}
                             className="neo-btn neo-btn-primary text-[9px] px-2 py-0.5">Apply</button>
                         </div>
@@ -182,20 +191,7 @@ export default function ATSAnalysis({
                   </div>
                 )}
 
-                {/* Apply all */}
-                {applied.size < 3 && (
-                  <button onClick={() => {
-                    if (analysis.summary_rewrite && !applied.has('summary')) { onApplySummary(analysis.summary_rewrite); markApplied('summary'); }
-                    if (analysis.skills_to_add.length > 0 && !applied.has('skills')) { onAddSkills(analysis.skills_to_add); markApplied('skills'); }
-                    analysis.achievements_to_enhance.forEach((a, i) => {
-                      if (!applied.has(`ach_${i}`)) { onApplyAchievement(a.experience_id, a.current, a.suggested); markApplied(`ach_${i}`); }
-                    });
-                    onApplyAll();
-                  }}
-                    className="neo-btn neo-btn-ghost w-full py-2 text-xs inline-flex items-center justify-center gap-1 text-brand-light">
-                    <Sparkles className="w-3 h-3" /> Apply All Fixes → Target 100%
-                  </button>
-                )}
+
               </div>
             </div>
           )}

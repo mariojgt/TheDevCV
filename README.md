@@ -155,3 +155,30 @@ TheDevCV/
 Export each application table as a JSON array and place it at `DATA_DIR/<table>.json`, for example `data/cv_profiles.json`. Keep the existing column names. On a server with no `users.json`, the first newly registered account (verified with the bootstrap token) claims all imported profile and application rows; child CV sections follow their parent profile automatically.
 
 For later backups, copy the complete data directory rather than only the application table files. The in-app download is intentionally scoped to the signed-in user's CV and job data and does not contain credentials or server secrets.
+
+## CV quality and AI review
+
+- **Review → Quality Checks** checks contact details, employment dates, duplicate achievements and unfinished placeholders locally. Career breaks do not need achievement bullets. Writing tips are guidance, not an employer's ATS score.
+- **Tailor → Job Alignment Review** compares the CV with a pasted job description, including visible projects, certifications and languages. Read each suggested summary or bullet before applying it. New skill suggestions must come from explicit technology lists in the CV; select only skills you can demonstrate.
+- Tailored versions preserve existing skill proficiency. Additional skills are excluded until you choose a proficiency in the review screen.
+- **Design & export → Review & export plain text** shows the content and reading order before download. All eight PDF styles use selectable text and standard Skills headings. A text preview is not a simulation of every employer's parser.
+- AI prompts prohibit guessed numbers, credentials, tools and seniority. Analysis rejects malformed results, unknown or stale bullet references, and newly introduced numeric tokens in suggested bullets. Inline rewrites also reject new numeric tokens. These checks cannot verify every factual claim: review the wording against your real experience.
+
+The formatting and writing guidance draws on [Greenhouse's resume parsing documentation](https://support.greenhouse.io/hc/en-us/articles/200989175-Unsuccessful-resume-parse) and [Harvard's resume guide](https://careerservices.fas.harvard.edu/resources/create-a-strong-resume/). Follow the employer's specific application requirements; the app does not certify acceptance or predict hiring outcomes.
+
+Run the local regression checks and production build:
+
+```sh
+cd frontend
+npm test
+npm run build
+```
+
+Tests include actual PDF text extraction for all eight styles, evidence filtering, malformed AI responses and CV completeness checks. They do not call a paid AI provider.
+
+
+## CV Studio interface
+
+The CV editor separates **Write**, **Review**, **Tailor**, **Design & export**, and **Portfolio**. The next-step card tracks four writing foundations and opens the relevant section; it is not a quality score. Section shortcuts open their accordion before scrolling to it.
+
+On desktop, the live preview fits the available width and offers 75% and 100% zoom. On smaller screens, writing opens first; use the preview button to open a full-screen preview, then Close or Escape to return to your form. Save and PDF export remain in the header. The dashboard offers direct access to your default CV, a new document, or importing an existing CV.

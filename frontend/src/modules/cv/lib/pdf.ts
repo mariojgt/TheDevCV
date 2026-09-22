@@ -1,4 +1,4 @@
-import jsPDF from 'jspdf';
+import { jsPDF } from 'jspdf';
 import type {
   CVProfile, CVExperience, CVEducation, CVSkill,
   CVCertification, CVProject, CVLanguage,
@@ -366,7 +366,7 @@ function renderHeading(ctx: Ctx, text: string) {
       // Minimal: small tracked label, no rule.
       setFont(ctx, 'normal', 8);
       setColor(ctx, ctx.mutedRgb);
-      ctx.doc.text(upper.split('').join(' '), ctx.ml, ctx.y); // fake letter-spacing
+      ctx.doc.text(upper, ctx.ml, ctx.y); // preserve extractable section words
       ctx.y += 4.5;
       break;
     }
@@ -549,12 +549,10 @@ function renderEducation(ctx: Ctx, data: CVData) {
   }
 }
 
-// ── Areas of Experience (formerly "Skills" — relocated above Summary
-//    in the call sequence so the recruiter's first scan after the name
-//    block is the candidate's domains rather than a marketing summary).
+// ── Skills — standard heading, grouped by category.
 function renderSkills(ctx: Ctx, data: CVData) {
   if (!data.skills.length) return;
-  renderHeading(ctx, 'Areas of Experience');
+  renderHeading(ctx, 'Skills');
 
   const grouped = data.skills.reduce((acc, s) => {
     const k = s.category || 'Other';
@@ -676,7 +674,8 @@ function capitalize(s: string): string {
 }
 
 // ── Main entry: render a CV using the chosen style ────────────────
-function renderATSPdf(data: CVData, style: PDFStyle) {
+export function createCVPDF(data: CVData, template: PDFStyle['id'] = 'classic') {
+  const style = STYLES[template] || STYLES.classic;
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   // Fill page background for dark templates.
   if (style.pageBg) {
@@ -708,7 +707,7 @@ function renderATSPdf(data: CVData, style: PDFStyle) {
   };
 
   renderHeader(ctx, data);
-  // Areas of Experience leads — recruiters get domain signal before prose.
+  // Skills leads — recruiters get domain signal before prose.
   renderSkills(ctx, data);
   renderSummary(ctx, data);
   // Entry-level: lead with Education to highlight academic background + capstone
@@ -721,10 +720,15 @@ function renderATSPdf(data: CVData, style: PDFStyle) {
     renderExperience(ctx, data);
     renderEducation(ctx, data);
   }
-  renderProjects(ctx, data);
+  renderProjects(ctx, { ...data, projects: data.projects.filter(p => p.show_on_cv !== false) });
   renderCertifications(ctx, data);
   renderLanguages(ctx, data);
 
+  return doc;
+}
+
+function renderATSPdf(data: CVData, style: PDFStyle) {
+  const doc = createCVPDF(data, style.id);
   const filename = `${data.profile.full_name || 'CV'}.pdf`.replace(/[^\w\s.\-]/g, '_');
   doc.save(filename);
 }

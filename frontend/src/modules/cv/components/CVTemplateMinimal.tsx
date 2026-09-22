@@ -57,10 +57,10 @@ export default function CVTemplateMinimal({
       {/* Thin rule */}
       <hr style={{ border: 'none', borderTop: '0.5px solid #ccc', margin: '0 0 20px' }} />
 
-      {/* Areas of Experience (relocated above Summary) */}
+      {/* Skills (relocated above Summary) */}
       {skills.length > 0 && (
         <div style={{ marginBottom: '20px' }}>
-          <MinimalHeading>Areas of Experience</MinimalHeading>
+          <MinimalHeading>Skills</MinimalHeading>
           {Object.entries(groupedSkills).map(([cat, items]) => (
             <div key={cat} style={{ marginBottom: '3px', fontSize: '9.5pt' }}>
               <span style={{ fontWeight: 700 }}>{cat}:</span>{' '}

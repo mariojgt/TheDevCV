@@ -75,7 +75,7 @@ export default function CVTemplateModern({
 
       {/* ── AREAS OF EXPERIENCE (relocated above Summary) ── */}
       {skills.length > 0 && (
-        <Section title="Areas of Experience">
+        <Section title="Skills">
           {Object.entries(groupedSkills).map(([cat, items]) => (
             <div key={cat} style={{ marginBottom: '3px', fontSize: '9.5pt' }}>
               <strong style={{ color: TEXT }}>{cat}:</strong>{' '}

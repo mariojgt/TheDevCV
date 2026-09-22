@@ -106,7 +106,7 @@ export default function CVTemplateNeoDark({
 
         {/* ── AREAS OF EXPERIENCE (relocated above Summary) ── */}
         {skills.length > 0 && (
-          <DarkSection title="Areas of Experience">
+          <DarkSection title="Skills">
             {Object.entries(groupedSkills).map(([cat, items]) => (
               <div key={cat} style={{ marginBottom: '4px', fontSize: '9.5pt' }}>
                 <span style={{ fontWeight: 800, color: TEXT }}>{cat}: </span>

@@ -178,6 +178,8 @@ export default function RichTextEditor(props: Props) {
     editorProps: {
       attributes: {
         class: 'tiptap-content focus:outline-none',
+        role: 'textbox',
+        'aria-multiline': 'true',
         ...(ariaLabel ? { 'aria-label': ariaLabel } : {}),
       },
     },
