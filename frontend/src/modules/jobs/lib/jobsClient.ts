@@ -45,7 +45,11 @@ function filtersToKey(f: JobFilters): string {
     f.query.trim().toLowerCase(),
     f.field,
     [...f.tags].sort().join(','),
+    [...f.exclude].sort().join(','),
+    [...f.sources].sort().join(','),
     f.remoteOnly ? '1' : '0',
+    f.hasSalary ? '1' : '0',
+    String(f.maxAge),
     f.location.trim().toLowerCase(),
   ].join('|');
 }
@@ -73,7 +77,11 @@ export async function searchJobs(filters: JobFilters, opts: { force?: boolean } 
       query: filters.query,
       field: filters.field || undefined,
       tags: filters.tags,
+      exclude: filters.exclude,
+      sources: filters.sources,
       remote: filters.remoteOnly || undefined,
+      has_salary: filters.hasSalary || undefined,
+      max_age: filters.maxAge || undefined,
       location: filters.location || undefined,
     },
   });

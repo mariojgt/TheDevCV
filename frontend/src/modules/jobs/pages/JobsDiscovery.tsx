@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Loader2, RefreshCw, Globe2, MapPin, Filter, X, Compass, Briefcase } from 'lucide-react';
+import { Search, Loader2, RefreshCw, Globe2, MapPin, Filter, X, Compass, Briefcase, Coins, CalendarClock } from 'lucide-react';
 import { searchJobs, clearSearchCache } from '../lib/jobsClient';
 import { useCV } from '../../cv/hooks/useCV';
 import { useApp } from '../../../contexts/AppContext';
@@ -8,19 +8,32 @@ import { useToast } from '../../../components/ui/Toast';
 import { PageHeader } from '../../../components/ui';
 import JobCard from '../components/JobCard';
 import JobDetail from '../components/JobDetail';
-import { FIELD_OPTIONS, type JobFilters, type NormalizedJob } from '../types';
+import { FIELD_OPTIONS, SOURCE_OPTIONS, type JobFilters, type NormalizedJob } from '../types';
 
 const DEFAULT_FILTERS: JobFilters = {
   query: '',
   field: '',
   tags: [],
+  exclude: [],
+  sources: SOURCE_OPTIONS.map((s) => s.value),
   remoteOnly: false,
+  hasSalary: false,
+  maxAge: 0,
   location: '',
 };
 
+const AGE_OPTIONS: { value: number; label: string }[] = [
+  { value: 0, label: 'Any time' },
+  { value: 1, label: 'Past 24h' },
+  { value: 3, label: 'Past 3 days' },
+  { value: 7, label: 'Past week' },
+  { value: 14, label: 'Past 2 weeks' },
+  { value: 30, label: 'Past 30 days' },
+];
+
 /** Jobs Discovery dashboard — free aggregated listings from Remotive,
- *  RemoteOK, and Arbeitnow, with live Wikipedia/Wikidata company intel and
- *  an OpenStreetMap pin for the HQ. No credits required. */
+ *  RemoteOK, The Muse, Arbeitnow, Jobicy, and Working Nomads, with live
+ *  Wikipedia/Wikidata company intel and an OpenStreetMap pin for the HQ. */
 export default function JobsDiscovery() {
   const navigate = useNavigate();
   const { costOf, hasCredits } = useApp();
@@ -118,7 +131,7 @@ export default function JobsDiscovery() {
     <div className="space-y-4">
       <PageHeader
         title="Discover jobs"
-        description="Live roles from Remotive, RemoteOK, and Arbeitnow. Click a job for full details, company intel, and a map of the HQ."
+        description="Live roles from Remotive, RemoteOK, The Muse, Arbeitnow, Jobicy, and Working Nomads. Click a job for full details, company intel, and a map of the HQ."
         actions={
           <button
             onClick={refresh}
@@ -164,8 +177,8 @@ export default function JobsDiscovery() {
           </button>
         </div>
 
-        {/* Row 2: location + remote toggle */}
-        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto] gap-2">
+        {/* Row 2: location + remote/recency/salary toggles */}
+        <div className="grid grid-cols-1 md:grid-cols-[1fr_auto_auto_auto] gap-2">
           <div className="relative">
             <MapPin className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-subtle pointer-events-none z-10" />
             <input
@@ -189,12 +202,67 @@ export default function JobsDiscovery() {
             />
             <Globe2 className="w-4 h-4" /> Remote only
           </label>
+          <label className={`inline-flex items-center gap-2 px-4 py-2.5 rounded-md border-[3px] text-xs font-bold uppercase tracking-wide cursor-pointer transition-colors whitespace-nowrap ${
+            draft.hasSalary
+              ? 'bg-emerald-500/10 border-emerald-500 text-emerald-400'
+              : 'bg-surface border-neo-border text-muted hover:border-emerald-500'
+          }`}>
+            <input
+              type="checkbox"
+              checked={draft.hasSalary}
+              onChange={(e) => setDraft((d) => ({ ...d, hasSalary: e.target.checked }))}
+              className="sr-only"
+            />
+            <Coins className="w-4 h-4" /> Salary listed
+          </label>
+          <div className="relative">
+            <CalendarClock className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-subtle pointer-events-none z-10" />
+            <select
+              value={draft.maxAge}
+              onChange={(e) => setDraft((d) => ({ ...d, maxAge: Number(e.target.value) }))}
+              className="neo-select pl-10 pr-3 py-2.5 appearance-none cursor-pointer"
+            >
+              {AGE_OPTIONS.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        {/* Tag chips */}
-        <TagInput tags={draft.tags} onChange={(tags) => setDraft((d) => ({ ...d, tags }))} />
+        {/* Row 3: sources + exclude */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[10px] font-bold uppercase tracking-wider text-subtle mr-1">Sources</span>
+          {SOURCE_OPTIONS.map((s) => {
+            const on = draft.sources.includes(s.value);
+            return (
+              <button
+                key={s.value}
+                type="button"
+                onClick={() => setDraft((d) => ({
+                  ...d,
+                  sources: on ? d.sources.filter((x) => x !== s.value) : [...d.sources, s.value],
+                }))}
+                className={`text-[10px] font-bold uppercase tracking-wide px-2 py-1 rounded-md border-2 transition-colors ${
+                  on ? 'bg-brand/10 border-brand text-brand-light' : 'bg-surface border-neo-border text-muted hover:border-brand'
+                }`}
+              >
+                {s.label}
+              </button>
+            );
+          })}
+        </div>
 
-        {(draft.query || draft.field || draft.tags.length || draft.remoteOnly || draft.location) ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+          <TagInput tags={draft.tags} onChange={(tags) => setDraft((d) => ({ ...d, tags }))} />
+          <TagInput
+            placeholder="Exclude terms (Enter to add)…"
+            tags={draft.exclude}
+            tone="red"
+            onChange={(exclude) => setDraft((d) => ({ ...d, exclude }))}
+          />
+        </div>
+
+        {(draft.query || draft.field || draft.tags.length || draft.exclude.length || draft.sources.length !== SOURCE_OPTIONS.length || draft.remoteOnly || draft.hasSalary || draft.maxAge > 0 || draft.location) ? (
           <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-wider">
             <button type="button" onClick={clearFilters} className="inline-flex items-center gap-1 text-muted hover:text-brand-light transition-colors">
               <X className="w-3 h-3" /> Clear filters
@@ -272,7 +340,12 @@ export default function JobsDiscovery() {
 }
 
 /** Small tag-chip editor — Enter adds, backspace-on-empty removes the last. */
-function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) => void }) {
+function TagInput({ tags, onChange, placeholder = 'Filter by tags (Enter to add)…', tone = 'brand' }: {
+  tags: string[];
+  onChange: (t: string[]) => void;
+  placeholder?: string;
+  tone?: 'brand' | 'red';
+}) {
   const [input, setInput] = useState('');
 
   const add = (raw: string) => {
@@ -287,7 +360,7 @@ function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) 
   return (
     <div className="flex flex-wrap items-center gap-1.5 px-2 py-2 rounded-md border-[3px] border-neo-border bg-surface">
       {tags.map((t) => (
-        <span key={t} className="neo-tag neo-tag-brand">
+        <span key={t} className={tone === 'red' ? 'neo-tag neo-tag-red' : 'neo-tag neo-tag-brand'}>
           {t}
           <button type="button" onClick={() => remove(t)} className="ml-1 hover:text-white" aria-label={`Remove ${t}`}>
             <X className="w-2.5 h-2.5 inline" />
@@ -304,7 +377,7 @@ function TagInput({ tags, onChange }: { tags: string[]; onChange: (t: string[]) 
           else if (e.key === ',' || e.key === ';') { e.preventDefault(); add(input); }
         }}
         onBlur={() => { if (input) add(input); }}
-        placeholder={tags.length ? '' : 'Filter by tags (Enter to add)…'}
+        placeholder={tags.length ? '' : placeholder}
         className="flex-1 min-w-[120px] bg-transparent text-xs outline-none text-white placeholder:text-subtle"
       />
     </div>

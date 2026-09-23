@@ -290,6 +290,7 @@ h1, h2, h3 {
 }
 .neo-tag-brand  { background: var(--color-brand);        color: #fff; border-color: #000; }
 .neo-tag-accent { background: var(--color-accent);       color: #000; border-color: #000; }
+.neo-tag-red    { background: #ef4444;               color: #fff; border-color: #000; }
 .neo-tag-ghost  { background: var(--color-surface-light); color: var(--color-muted); border-color: var(--color-neo-border); }
 .neo-tag-rotate { transform: rotate(-2deg); }
 

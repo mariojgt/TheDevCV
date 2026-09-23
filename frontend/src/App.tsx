@@ -9,6 +9,7 @@ import CVDashboard from './modules/cv/pages/CVDashboard';
 import CVEditor from './modules/cv/pages/CVEditor';
 import CVImport from './modules/cv/pages/CVImport';
 import CVJobMatch from './modules/cv/pages/CVJobMatch';
+import LinkedInBanner from './modules/cv/pages/LinkedInBanner';
 import JobTracker from './modules/cv/pages/JobTracker';
 import PublicCV from './modules/cv/pages/PublicCV';
 import JobsDiscovery from './modules/jobs/pages/JobsDiscovery';
@@ -32,6 +33,7 @@ export default function App() {
         <Route index               element={<CVDashboard />} />
         <Route path="import"       element={<CVImport />} />
         <Route path="match"        element={<CVJobMatch />} />
+        <Route path="banner"       element={<LinkedInBanner />} />
         <Route path="jobs"         element={<JobTracker />} />
         <Route path="jobs/:id"     element={<JobTracker />} />
         <Route path="jobs/new"     element={<JobTracker />} />

@@ -141,9 +141,120 @@ async function fetchArbeitnow(query, field) {
   }));
 }
 
+async function fetchTheMuse(query, field) {
+  const params = new URLSearchParams();
+  params.set('page', '1');
+  params.set('limit', '50');
+  if (query) params.set('query', query);
+  const res = await fetchWithTimeout(`https://www.themuse.com/api/public/jobs?${params}`);
+  if (!res.ok) return [];
+  const data = await safeJson(res);
+  const jobs = Array.isArray(data?.results) ? data.results : [];
+  const fieldSyns = field ? FIELD_SYNONYMS[field] ?? [] : [];
+  return jobs
+    .filter((j) => {
+      const hay = `${j.name ?? ''} ${j.contents ?? ''} ${(Array.isArray(j.categories) ? j.categories.map((c) => c.name).join(' ') : '')} ${(Array.isArray(j.levels) ? j.levels.map((l) => l.name).join(' ') : '')}`.toLowerCase();
+      if (query && !hay.includes(query.toLowerCase())) return false;
+      if (fieldSyns.length && !fieldSyns.some((s) => hay.includes(s))) return false;
+      return true;
+    })
+    .map((j) => {
+      const locs = (Array.isArray(j.locations) ? j.locations.map((l) => l.name) : []);
+      const tags = [
+        ...(Array.isArray(j.categories) ? j.categories.map((c) => c.name) : []),
+        ...(Array.isArray(j.levels) ? j.levels.map((l) => l.name) : []),
+      ].filter(Boolean);
+      const hayLocs = locs.join(' ').toLowerCase();
+      return {
+        id: `muse-${j.id}`,
+        source: 'muse',
+        title: String(j.name ?? ''),
+        company: String(j.company?.name ?? ''),
+        companyLogo: j.company?.name ? `https://logo.clearbit.com/${canonicaliseCompanyName(j.company.name).toLowerCase().replace(/[^a-z0-9]/g, '')}.com` : null,
+        location: locs.length ? locs.join(', ') : 'Remote',
+        remote: ANYWHERE_LOCATIONS.test(hayLocs) || /\bremote\b/.test(hayLocs),
+        description: String(j.contents ?? ''),
+        url: String(j.refs?.landing_page ?? ''),
+        postedAt: j.publication_date ?? null,
+        tags,
+        salary: j.salary ? String(j.salary) : null,
+      };
+    });
+}
+
+async function fetchJobicy(query, field) {
+  const params = new URLSearchParams();
+  params.set('count', '50');
+  const res = await fetchWithTimeout(`https://jobicy.com/api/v2/remote-jobs?${params}`);
+  if (!res.ok) return [];
+  const data = await safeJson(res);
+  const jobs = Array.isArray(data?.jobs) ? data.jobs : [];
+  const fieldSyns = field ? FIELD_SYNONYMS[field] ?? [] : [];
+  return jobs
+    .filter((j) => {
+      const hay = `${j.jobTitle ?? ''} ${j.jobIndustry ?? ''} ${j.jobDescription ?? ''} ${j.jobLevel ?? ''}`.toLowerCase();
+      if (query && !hay.includes(query.toLowerCase())) return false;
+      if (fieldSyns.length && !fieldSyns.some((s) => hay.includes(s))) return false;
+      return true;
+    })
+    .map((j) => {
+      const tags = [j.jobIndustry, j.jobLevel, j.jobType].filter((x) => typeof x === 'string' && x);
+      let salary = null;
+      if (j.annualSalaryMin && j.annualSalaryMax) {
+        const cur = j.salaryCurrency || 'USD';
+        salary = `${cur} ${j.annualSalaryMin} – ${j.annualSalaryMax} / yr`;
+      }
+      return {
+        id: `jobicy-${j.id}`,
+        source: 'jobicy',
+        title: String(j.jobTitle ?? ''),
+        company: String(j.companyName ?? ''),
+        companyLogo: j.companyLogo ?? null,
+        location: String(j.jobGeo ?? 'Remote'),
+        remote: true,
+        description: String(j.jobDescription ?? ''),
+        url: String(j.url ?? ''),
+        postedAt: j.pubDate ?? null,
+        tags,
+        salary,
+      };
+    });
+}
+
+async function fetchWorkingNomads(query, field) {
+  const res = await fetchWithTimeout('https://www.workingnomads.com/api/exposed_jobs/');
+  if (!res.ok) return [];
+  const data = await safeJson(res);
+  const jobs = Array.isArray(data) ? data : [];
+  const fieldSyns = field ? FIELD_SYNONYMS[field] ?? [] : [];
+  const q = query.toLowerCase();
+  return jobs
+    .filter((j) => {
+      const hay = `${j.title ?? ''} ${j.category ?? ''} ${j.description ?? ''} ${Array.isArray(j.tags) ? j.tags.join(' ') : ''}`.toLowerCase();
+      if (q && !hay.includes(q)) return false;
+      if (fieldSyns.length && !fieldSyns.some((s) => hay.includes(s))) return false;
+      return true;
+    })
+    .slice(0, 60)
+    .map((j) => ({
+      id: `wn-${j.id ?? `${j.title}-${j.company}`}`,
+      source: 'workingnomads',
+      title: String(j.title ?? ''),
+      company: String(j.company ?? ''),
+      companyLogo: null,
+      location: String(j.location ?? 'Remote'),
+      remote: j.remote !== undefined ? Boolean(j.remote) : true,
+      description: String(j.description ?? ''),
+      url: String(j.url ?? ''),
+      postedAt: j.pub_date ?? j.publication_date ?? null,
+      tags: Array.isArray(j.tags) ? j.tags : (j.category ? [String(j.category)] : []),
+      salary: null,
+    }));
+}
+
 function dedupe(jobs) {
   const seen = new Map();
-  const rank = { remotive: 3, remoteok: 2, arbeitnow: 1 };
+  const rank = { muse: 4, remotive: 3, remoteok: 2, arbeitnow: 1, jobicy: 1, workingnomads: 1 };
   for (const j of jobs) {
     const key = `${j.company.toLowerCase().trim()}|${j.title.toLowerCase().trim()}`;
     const existing = seen.get(key);
@@ -323,12 +434,17 @@ export async function handleJobsProxy(body) {
   if (body.action === 'search') {
     const query = (body.query ?? '').trim();
     const field = (body.field ?? '').trim() || undefined;
-    const sources = body.source ? [body.source] : ['remotive', 'remoteok', 'arbeitnow'];
+    const sources = Array.isArray(body.sources)
+      ? body.sources.filter((s) => ['remotive', 'remoteok', 'arbeitnow', 'muse', 'jobicy', 'workingnomads'].includes(s))
+      : (body.source ? [body.source] : ['remotive', 'remoteok', 'arbeitnow', 'muse', 'jobicy', 'workingnomads']);
 
     const results = await Promise.allSettled([
-      sources.includes('remotive')  ? fetchRemotive(query, field)  : Promise.resolve([]),
-      sources.includes('remoteok')  ? fetchRemoteOK(query, field)  : Promise.resolve([]),
-      sources.includes('arbeitnow') ? fetchArbeitnow(query, field) : Promise.resolve([]),
+      sources.includes('remotive')      ? fetchRemotive(query, field)      : Promise.resolve([]),
+      sources.includes('remoteok')      ? fetchRemoteOK(query, field)      : Promise.resolve([]),
+      sources.includes('arbeitnow')     ? fetchArbeitnow(query, field)     : Promise.resolve([]),
+      sources.includes('muse')          ? fetchTheMuse(query, field)       : Promise.resolve([]),
+      sources.includes('jobicy')        ? fetchJobicy(query, field)        : Promise.resolve([]),
+      sources.includes('workingnomads') ? fetchWorkingNomads(query, field) : Promise.resolve([]),
     ]);
 
     const all = [];
@@ -347,7 +463,25 @@ export async function handleJobsProxy(body) {
         return wanted.every((w) => hay.includes(w));
       });
     }
+    if (Array.isArray(body.exclude) && body.exclude.length) {
+      const banned = body.exclude.map((t) => String(t).toLowerCase()).filter(Boolean);
+      filtered = filtered.filter((j) => {
+        const hay = [j.title, j.description, ...j.tags].join(' ').toLowerCase();
+        return !banned.some((b) => hay.includes(b));
+      });
+    }
     if (body.remote === true) filtered = filtered.filter((j) => j.remote);
+    if (body.has_salary === true) filtered = filtered.filter((j) => !!j.salary);
+
+    const maxAgeDays = Number(body.max_age);
+    if (Number.isFinite(maxAgeDays) && maxAgeDays > 0) {
+      const cutoff = Date.now() - maxAgeDays * 86_400_000;
+      filtered = filtered.filter((j) => {
+        if (!j.postedAt) return true; // unknown dates are never excluded
+        const t = Date.parse(j.postedAt);
+        return Number.isFinite(t) && t >= cutoff;
+      });
+    }
 
     if (body.location) {
       const loc = body.location.toLowerCase();
@@ -360,6 +494,9 @@ export async function handleJobsProxy(body) {
     }
 
     filtered.sort((a, b) => (b.postedAt ?? '').localeCompare(a.postedAt ?? ''));
+
+    const max = Number.isFinite(Number(body.max)) && Number(body.max) > 0 ? Number(body.max) : 120;
+    filtered = filtered.slice(0, max);
 
     return { status: 200, payload: { jobs: filtered, count: filtered.length, sources, errors: errors.length ? errors : undefined } };
   }

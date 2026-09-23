@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search, FileUser, Plus, Upload, Target, Briefcase, Compass,
-  Settings, CornerDownLeft, Command, ArrowUpDown,
+  Settings, CornerDownLeft, Command, ArrowUpDown, Image,
 } from 'lucide-react';
 import { supabase } from '../lib/supabase';
 import type { CVProfile } from '../modules/cv/types';
@@ -81,6 +81,7 @@ export default function CommandPalette() {
       { id: 'nav-discover',     group: 'Navigate', label: 'Discover jobs',      icon: Compass,   perform: () => go('/cv/discover'), keywords: 'find search postings' },
       { id: 'nav-applications', group: 'Navigate', label: 'Applications',       icon: Briefcase, perform: () => go('/cv/jobs'),     keywords: 'tracker pipeline' },
       { id: 'nav-tailor',       group: 'Navigate', label: 'Tailor CV to job',   icon: Target,    perform: () => go('/cv/match'),    keywords: 'match jd ats' },
+      { id: 'nav-banner',       group: 'Navigate', label: 'LinkedIn banner',     icon: Image,     perform: () => go('/cv/banner'),   keywords: 'cover linkedin png export' },
       { id: 'create-cv',        group: 'Create',   label: 'New CV',             hint: 'Start from blank', icon: Plus,    perform: () => go('/cv/new'),    keywords: 'blank fresh add' },
       { id: 'import-cv',        group: 'Create',   label: 'Import existing CV', hint: 'PDF or image',     icon: Upload,  perform: () => go('/cv/import'), keywords: 'upload ocr pdf' },
       { id: 'acc-settings',     group: 'Account',  label: 'Settings',           hint: 'MCP, AI, backups', icon: Settings, perform: () => go('/settings'), keywords: 'mcp ai backup export server' },

@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { NavLink, Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { FileUser, Briefcase, Target, Settings, Compass, Command, Menu, X, LogOut, Loader2 } from 'lucide-react';
+import { FileUser, Briefcase, Target, Settings, Compass, Command, Menu, X, LogOut, Loader2, Image } from 'lucide-react';
 import Logo from './Logo';
 import PlanBadge from './PlanBadge';
 import CommandPalette from './CommandPalette';
@@ -12,6 +12,7 @@ const baseNav = [
   { to: '/cv/discover', label: 'Discover',      icon: Compass },
   { to: '/cv/jobs',     label: 'Applications',  icon: Briefcase },
   { to: '/cv/match',    label: 'Tailor to job', icon: Target },
+  { to: '/cv/banner',   label: 'LinkedIn banner', icon: Image },
   { to: '/settings',    label: 'Settings',      icon: Settings },
 ];
 

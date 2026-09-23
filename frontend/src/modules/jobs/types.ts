@@ -4,7 +4,16 @@
  * keep in sync.
  */
 
-export type JobSource = 'remotive' | 'remoteok' | 'arbeitnow';
+export type JobSource = 'remotive' | 'remoteok' | 'arbeitnow' | 'muse' | 'jobicy' | 'workingnomads';
+
+export const SOURCE_OPTIONS: { value: JobSource; label: string }[] = [
+  { value: 'remotive',      label: 'Remotive' },
+  { value: 'remoteok',      label: 'RemoteOK' },
+  { value: 'muse',          label: 'The Muse' },
+  { value: 'arbeitnow',     label: 'Arbeitnow' },
+  { value: 'jobicy',        label: 'Jobicy' },
+  { value: 'workingnomads', label: 'Working Nomads' },
+];
 
 export interface NormalizedJob {
   id: string;
@@ -62,7 +71,15 @@ export interface JobFilters {
   field: FieldSlug | '';
   /** AND-filtered after the source returns — each tag must appear in title/description/tags. */
   tags: string[];
+  /** Negative keywords — jobs matching ANY of these are removed (title/description/tags). */
+  exclude: string[];
+  /** Job boards to query. Empty = all enabled sources. */
+  sources: JobSource[];
   remoteOnly: boolean;
+  /** Only keep jobs listed with an explicit salary range. */
+  hasSalary: boolean;
+  /** Max posting age in days. 0 = any age. Unknown dates always pass. */
+  maxAge: number;
   /** Substring match against the job's location field — remote/worldwide jobs
    *  always pass this filter, so typing a city narrows rather than excludes. */
   location: string;
