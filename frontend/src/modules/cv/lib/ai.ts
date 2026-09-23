@@ -161,6 +161,15 @@ STRUCTURE & READABILITY
 • Prioritise relevant content; length depends on the candidate and the employer's instructions. Never invent content to meet a word count.
 • Use clear language and concrete verbs. No unsupported claims about AI detection or vocabulary causing rejection.
 
+ATS COMPLIANCE (every ready-to-use CV deliverable must satisfy these):
+• Stay machine-parseable: single-column flow, left-to-right reading order, standard section headings (Summary, Work Experience, Education, Skills, Projects, Certifications, Languages).
+• No tables, columns, sidebars, text boxes, graphics, icons, photos, or decorative chars that break text extraction or reading order.
+• Keep name and contact details (email, phone, location, links) at the top as plain text; one clear email address (no underscores after an @) and one consistent phone format.
+• Show every role with visible, consistent dates in the same format (prefer MM/YYYY); never hide or round dates — the chronological spine must be readable by parsers.
+• Use telegraphic bullets: action verb + specific contribution + supported result. Reverse-chronological experience. No headers/footers that repeat contact info on later pages, no page breaks inside a single entry.
+• Mirror the job posting's exact keywords and phrases wherever the candidate's evidence supports the same meaning — literal phrasing survives ATS keyword filters.
+• Dates, section headings, and bullet lines are plain text only; no special characters, smart quotes that could garble extraction, or invisible zero-width characters.
+
 JOB ALIGNMENT
 • Use job terminology naturally where the candidate's evidence supports the same meaning. Explain relevant acronyms when useful; do not stuff or hide keywords.
 • Distinguish demonstrated strengths, missing evidence, and actual qualification gaps. Do not imply every gap can be fixed by rewriting.
@@ -472,6 +481,7 @@ export interface TailoredCV {
   match_reasons: { strength: string; detail: string }[];
   gaps_remaining: { area: string; suggestion: string }[];
   cover_letter: string;
+  ats_compliance: string[];
 }
 
 export async function tailorCVToJob(
@@ -534,7 +544,8 @@ Return ONLY valid JSON:
   "skills_to_highlight": ["existing skill names that directly match job requirements"],
   "projects_to_highlight": ["names of existing projects most relevant to this job — order by relevance"],
   "certs_to_highlight": ["names of existing certifications relevant to this job"],
-  "cover_letter": "3-4 paragraph cover letter: (1) compelling hook mentioning company by name and why you're drawn to the role, (2-3) specific achievements that directly address their top requirements with metrics, (4) enthusiastic close with call to action"
+  "cover_letter": "3-4 paragraph cover letter: (1) compelling hook mentioning company by name and why you're drawn to the role, (2-3) specific achievements that directly address their top requirements with metrics, (4) enthusiastic close with call to action",
+  "ats_compliance": ["short checklist item — one parseability/structure guarantee this tailored CV satisfies"]
 }
 
 Critical rules:
@@ -550,7 +561,8 @@ Critical rules:
 - "projects_to_highlight": Which of their projects are most relevant to this role? Order by relevance. Empty array if no projects.
 - "certs_to_highlight": Which certifications matter for this role? Empty array if none relevant.
 - "keywords": Extract up to 20 important ATS terms from the job description — include exact phrases the ATS will scan for.
-- "cover_letter": NEVER generic. Must reference company name, specific role, and real achievements with numbers.`,
+- "cover_letter": NEVER generic. Must reference company name, specific role, and real achievements with numbers.
+- "ats_compliance": List 4-8 concrete ATS-compliance properties the tailored output satisfies (e.g. "Standard section headings", "Single-column text flow", "Consistent MM/YYYY dates on every role", "Keywords mirror the job posting verbatim", "Action-verb, telegraphic bullets", "Plain-text contact block at top"). These describe the structure/parseability choices of the generated content, NOT an employer ATS score. Return the empty array instead of guessing if none genuinely apply.`,
 
     `MY CURRENT CV:\n${cvText}\n\nExperience IDs:\n${experience.map(e => `${e.id}: ${e.role} at ${e.company}`).join('\n')}\n\nProject names:\n${projects.map(p => p.name).join('\n')}\n\nCertification names:\n${certifications.map(c => c.name).join('\n')}\n\nJOB DESCRIPTION:\n${jobDescription}`,
     settings,
@@ -558,7 +570,7 @@ Critical rules:
     8192,
   );
 
-  const parsed = extractJson<TailoredCV & Partial<{ projects_to_highlight: string[]; certs_to_highlight: string[]; match_reasons: { strength: string; detail: string }[]; gaps_remaining: { area: string; suggestion: string }[] }>>(response, 'object');
+  const parsed = extractJson<TailoredCV & Partial<{ projects_to_highlight: string[]; certs_to_highlight: string[]; match_reasons: { strength: string; detail: string }[]; gaps_remaining: { area: string; suggestion: string }[]; ats_compliance: string[] }>>(response, 'object');
   if (!parsed || typeof parsed.summary !== 'string' || typeof parsed.company !== 'string' ||
       typeof parsed.position !== 'string' || typeof parsed.cover_letter !== 'string' ||
       !Number.isFinite(parsed.ats_score) || !Number.isFinite(parsed.original_score) ||
@@ -586,7 +598,152 @@ Critical rules:
     certs_to_highlight: stringList(parsed.certs_to_highlight).filter(name => certifications.some(c => c.name === name)),
     match_reasons: (Array.isArray(parsed.match_reasons) ? parsed.match_reasons : []).filter(r => r && typeof r.strength === 'string' && typeof r.detail === 'string'),
     gaps_remaining: (Array.isArray(parsed.gaps_remaining) ? parsed.gaps_remaining : []).filter(g => g && typeof g.area === 'string' && typeof g.suggestion === 'string'),
+    ats_compliance: stringList(parsed.ats_compliance),
     original_score: Math.max(0, Math.min(100, Math.round(parsed.original_score))),
+  };
+}
+
+export type PrepQuestionType = 'behavioral' | 'technical' | 'situational' | 'culture_fit' | 'role_specific';
+
+export interface PrepQuestion {
+  question: string;
+  type: PrepQuestionType;
+  why_asked: string;
+  suggested_answer: string;
+}
+
+export interface CompanyIntel {
+  name: string;
+  domain: string;
+  industry: string;
+  mission: string;
+  team: string[];
+  tech_stack: string[];
+  culture: string[];
+  challenges: string[];
+}
+
+export interface InterviewPrepPack {
+  company_intel: CompanyIntel;
+  interview_process: { step: string; detail: string }[];
+  value_questions: PrepQuestion[];
+  likely_questions: PrepQuestion[];
+  questions_to_ask: { question: string; why: string }[];
+  talking_points: string[];
+  opening_pitch: string;
+}
+
+/**
+ * Interview strategy package for the "Tailor to a job" flow. Uses AI to build,
+ * from the job description + the candidate's real CV:
+ *   - company intel (domain, team, tech stack, culture, challenges, mission),
+ *   - a likely interview process,
+ *   - the "always asked" strategy questions ("how will you add to the team",
+ *     "why this company", "how do we compete with other teams", "how can you make
+ *     an impact") with role-specific suggested answers,
+ *   - a wider set of likely questions with STAR answers,
+ *   - questions to ask the interviewer, talking points, and a 60-second pitch.
+ * All suggestions are grounded in the candidate's actual CV; answers never
+ * fabricate experience. Costs 1 `ai_improve` credit.
+ */
+export async function generateInterviewPrepPack(
+  profile: CVProfile,
+  experience: CVExperience[],
+  education: CVEducation[],
+  skills: CVSkill[],
+  jobDescription: string,
+  company: string,
+  position: string,
+  settings: UserSettings,
+  certifications: CVCertification[] = [],
+  projects: CVProject[] = [],
+  languages: CVLanguage[] = [],
+): Promise<InterviewPrepPack> {
+  const cvText = buildCVText(profile, experience, education, skills, certifications, projects, languages);
+
+  const response = await callAI(
+    `You are an elite interview coach and job-strategy analyst. Everything you generate must be grounded in the candidate's ACTUAL CV — never invent companies, projects, metrics, or skills. The job description is the source for company intel and the process, and it is a requirement list, never evidence of the candidate's abilities.${buildCandidateContext(profile)}
+
+Prepare a full interview strategy pack for this specific role. Return ONLY valid JSON, no prose, no markdown fences:
+
+{
+  "company_intel": {
+    "name": "company name from the job description",
+    "domain": "what the company makes or does — strictly what the posting reveals; say 'Not stated in the posting' when unknown",
+    "industry": "industry classification",
+    "mission": "mission/purpose signals from the posting — 1 sentence; 'Not stated in the posting' if unknown",
+    "team": ["teams/roles the posting suggests exist (engineering, product, ...)"],
+    "tech_stack": ["tools/technologies named in the posting"],
+    "culture": ["culture/work-style signals the posting reveals (remote, on-call, ownership, ...)"],
+    "challenges": ["problems the team is likely hiring to solve, inferred only from the posting"]
+  },
+  "interview_process": [
+    { "step": "e.g. Recruiter screen", "detail": "what to expect and how to prepare" }
+  ],
+  "value_questions": [
+    {
+      "question": "classic value-add questions — MUST include at least: 'How will you add value to this team?', 'Why do you want to work here / why this company?', 'How do you compare with other candidates and teams we're considering?', 'How can you make an impact in your first 90 days?'",
+      "type": "behavioral|technical|situational|culture_fit|role_specific",
+      "why_asked": "what the interviewer is really evaluating",
+      "suggested_answer": "specific STAR-format answer using ONLY the candidate's real experience and, where possible, the company's actual challenges/domain from the posting"
+    }
+  ],
+  "likely_questions": [
+    {
+      "question": "another likely interview question for this role",
+      "type": "behavioral|technical|situational|culture_fit|role_specific",
+      "why_asked": "what the interviewer is really evaluating",
+      "suggested_answer": "STAR-format answer using ONLY the candidate's real experience"
+    }
+  ],
+  "questions_to_ask": [
+    { "question": "smart question for the interviewer", "why": "what it reveals and why it impresses" }
+  ],
+  "talking_points": ["specific points that show you researched this company and role"],
+  "opening_pitch": "a 60-second 'tell me about yourself' tailored to this role and company"
+}
+
+Rules:
+- value_questions: 4 items — exactly the value-add questions above (one per question). Each answer must name the candidate's actual team/impact/engineering wins and tie them to this company's challenges. No generic fluff.
+- likely_questions: 10-15 items covering ALL types (behavioral, technical, situational, culture_fit, role_specific). Suggestions must reference the candidate's real companies, projects, and achievements.
+- interview_process: 4-6 realistic, ordered steps for this role/industry (screen → technical → team/hiring-manager → offer). State uncertainty where the posting doesn't confirm a step.
+- company_intel: derive ONLY from the job description + detected company name. Empty arrays (never fabricated guesses) when the posting doesn't reveal them.
+- questions_to_ask: 5-6 strategic questions.
+- talking_points: 6-8 items.
+- opening_pitch: concise, natural, ends with why you're excited about THIS role at THIS company.
+- NEVER invent facts about the candidate. If the CV lacks evidence for an answer, say how to frame the honest answer rather than fabricating.`,
+
+    `CANDIDATE CV:\n${cvText}\n\nDETECTED COMPANY:\n${company}\nDETECTED POSITION:\n${position}\n\nJOB DESCRIPTION:\n${jobDescription}`,
+    settings,
+    'ai_improve',
+    8192,
+  );
+
+  const parsed = extractJson<Partial<InterviewPrepPack>>(response, 'object');
+  if (!parsed) throw new Error('AI returned an incomplete interview strategy. Please try again.');
+  const ci = parsed.company_intel;
+  if (!ci || typeof ci !== 'object') throw new Error('AI returned an incomplete interview strategy. Please try again.');
+  const cleanRecordList = <T>(items: unknown, guard: (v: unknown) => v is T): T[] => (Array.isArray(items) ? items : []).filter((v): v is T => guard(v));
+  const isQuestion = (v: unknown): v is PrepQuestion => !!v && typeof v === 'object' && typeof (v as PrepQuestion).question === 'string' && typeof (v as PrepQuestion).suggested_answer === 'string';
+  const isQA = (v: unknown): v is { question: string; why: string } => !!v && typeof v === 'object' && typeof (v as { question: string }).question === 'string' && typeof (v as { why: string }).why === 'string';
+  const isStep = (v: unknown): v is { step: string; detail: string } => !!v && typeof v === 'object' && typeof (v as { step: string }).step === 'string' && typeof (v as { detail: string }).detail === 'string';
+  return {
+    company_intel: {
+      name: typeof ci.name === 'string' ? ci.name : company,
+      domain: typeof ci.domain === 'string' ? ci.domain : '',
+      industry: typeof ci.industry === 'string' ? ci.industry : '',
+      mission: typeof ci.mission === 'string' ? ci.mission : '',
+      team: stringList(ci.team),
+      tech_stack: stringList(ci.tech_stack),
+      culture: stringList(ci.culture),
+      challenges: stringList(ci.challenges),
+    },
+    interview_process: cleanRecordList(parsed.interview_process, isStep),
+    value_questions: cleanRecordList(parsed.value_questions, isQuestion),
+    likely_questions: cleanRecordList(parsed.likely_questions, isQuestion),
+    questions_to_ask: cleanRecordList(parsed.questions_to_ask, isQA),
+    talking_points: stringList(parsed.talking_points),
+    opening_pitch: typeof parsed.opening_pitch === 'string' ? parsed.opening_pitch.trim() : '',
   };
 }
 

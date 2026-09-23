@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import { ArrowLeft, Brain, Loader2, CheckCircle, Sparkles, Target, FileText, Copy, AlertCircle, Briefcase, TrendingUp, AlertTriangle, Award, FolderOpen, Coins } from 'lucide-react';
+import { ArrowLeft, Brain, Loader2, CheckCircle, Sparkles, Target, FileText, Copy, AlertCircle, Briefcase, TrendingUp, AlertTriangle, Award, FolderOpen, Coins, Building2, MessagesSquare, ListChecks, ChevronDown, ChevronUp } from 'lucide-react';
 import { useApp } from '../../../contexts/AppContext';
 import { useCV } from '../hooks/useCV';
 import { supabase } from '../../../lib/supabase';
-import { tailorCVToJob, type TailoredCV } from '../lib/ai';
+import { tailorCVToJob, generateInterviewPrepPack, type TailoredCV, type InterviewPrepPack } from '../lib/ai';
 import { InsufficientCreditsError } from '../../../lib/ai-client';
 import type { CVProfile, CVExperience, CVEducation, CVSkill, CVCertification, CVProject, CVLanguage } from '../types';
 
@@ -22,6 +22,11 @@ export default function CVJobMatch() {
   const [tailored, setTailored] = useState<TailoredCV | null>(null);
   const [copiedCL, setCopiedCL] = useState(false);
   const [skillLevels, setSkillLevels] = useState<Record<string, CVSkill['proficiency']>>({});
+  const [prep, setPrep] = useState<InterviewPrepPack | null>(null);
+  const [prepLoading, setPrepLoading] = useState(false);
+  const [prepError, setPrepError] = useState('');
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({});
+  const toggleSection = (key: string) => setOpenSections(prev => ({ ...prev, [key]: !prev[key] }));
 
   // Load the default CV profile and its sections
   const [profile, setProfile] = useState<CVProfile | null>(null);
@@ -203,6 +208,25 @@ export default function CVJobMatch() {
     }
   };
 
+  const handleGeneratePrep = async () => {
+    if (!profile || !settings?.encrypted_api_key || !tailored) return;
+    if (!hasCredits('ai_improve')) {
+      setPrepError(`Interview prep costs ${costOf('ai_improve')} credit — you have ${credits}. Top up to continue.`);
+      return;
+    }
+    setPrepLoading(true);
+    setPrepError('');
+    try {
+      const pack = await generateInterviewPrepPack(profile, experience, education, skills, jobText, tailored.company, tailored.position, settings, certifications, projects, languages);
+      setPrep(pack);
+      refreshCredits();
+    } catch (err: any) {
+      setPrepError(err?.message || 'Failed to generate interview prep');
+    } finally {
+      setPrepLoading(false);
+    }
+  };
+
   if (loadingCV) return <div className="flex justify-center py-20"><Loader2 className="w-6 h-6 animate-spin text-emerald-400" /></div>;
 
   if (!profile) {
@@ -234,8 +258,10 @@ export default function CVJobMatch() {
               <li>Paste the job description (or URL) below</li>
               <li>AI analyzes requirements and matches them to your CV: <strong>{profile.version_name}</strong></li>
               <li>AI rewrites your summary, reorders skills, enhances achievements for this role</li>
+              <li>AI checks every generated section for ATS compliance (headings, dates, keywords, parseable layout)</li>
               <li>A new CV version is created named after the company + role</li>
               <li>A job application is auto-tracked with ATS score and cover letter</li>
+              <li>AI prepares possible interview questions, a likely interview process, and company intel</li>
             </ol>
           </div>
 
@@ -298,6 +324,7 @@ export default function CVJobMatch() {
           <div className="text-xs text-[var(--color-text-secondary)] space-y-1 text-center">
             <p>Analyzing job requirements against your experience</p>
             <p>Rewriting summary, enhancing achievements, matching skills</p>
+            <p>Enforcing ATS-compliant structure, headings, and dates</p>
             <p className="mt-3 text-emerald-400/60">This takes 15–45 seconds</p>
           </div>
         </div>
@@ -376,6 +403,22 @@ export default function CVJobMatch() {
                   </div>
                 ))}
               </div>
+            </div>
+          )}
+
+          {/* ATS compliance */}
+          {tailored.ats_compliance.length > 0 && (
+            <div className="neo-card p-4">
+              <h3 className="text-sm font-semibold mb-2 flex items-center gap-2"><ListChecks className="w-4 h-4 text-emerald-400" /> ATS Compliance</h3>
+              <p className="text-xs text-muted mb-2">Structure and parseability checks AI verified in this tailored CV — not an employer ATS score.</p>
+              <ul className="space-y-1.5">
+                {tailored.ats_compliance.map((item, i) => (
+                  <li key={i} className="flex gap-2">
+                    <CheckCircle className="w-3.5 h-3.5 text-emerald-400 mt-0.5 shrink-0" />
+                    <span className="text-xs text-[var(--color-text-secondary)]">{item}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 
@@ -484,6 +527,181 @@ export default function CVJobMatch() {
             </div>
           )}
 
+          {/* Interview prep & company intel */}
+          <div className="neo-card p-4">
+            <div className="flex items-start justify-between gap-3 mb-2">
+              <div>
+                <h3 className="text-sm font-semibold flex items-center gap-2"><MessagesSquare className="w-4 h-4 text-violet-400" /> Interview Prep & Company Intel</h3>
+                <p className="text-xs text-muted mt-0.5">AI builds possible questions, a likely interview process, and company intel from this posting — answers use your real CV.</p>
+              </div>
+              {!prep && !prepLoading && (
+                <button onClick={handleGeneratePrep} disabled={!settings?.encrypted_api_key || !hasCredits('ai_improve')}
+                  className="neo-btn neo-btn-primary px-3 py-1.5 text-xs flex items-center gap-1.5 shrink-0">
+                  <Sparkles className="w-3.5 h-3.5" /> Generate with AI
+                  <span className="inline-flex items-center gap-0.5 opacity-90"><Coins className="w-3 h-3" />{costOf('ai_improve')}</span>
+                </button>
+              )}
+            </div>
+
+            {prepError && (
+              <div className="flex items-center gap-2 p-2 rounded-lg bg-red-500/10 border border-red-500/30 text-red-300 text-xs mb-3">
+                <AlertCircle className="w-3.5 h-3.5 shrink-0" /> {prepError}
+              </div>
+            )}
+
+            {prepLoading && (
+              <div className="flex items-center gap-2 py-4 text-xs text-[var(--color-text-secondary)]">
+                <Loader2 className="w-4 h-4 animate-spin text-violet-400" />
+                Drafting company profile, interview process, and questions…
+              </div>
+            )}
+
+            {prep && (
+              <div className="space-y-4">
+                {/* Company intel */}
+                <div className="rounded-lg border border-[var(--color-border)] p-3">
+                  <div className="flex items-center gap-1.5 mb-2">
+                    <Building2 className="w-3.5 h-3.5 text-cyan-400" />
+                    <span className="text-xs font-semibold">Company Profile</span>
+                  </div>
+                  <div className="space-y-1.5 text-xs">
+                    <p className="text-[var(--color-text-secondary)]"><span className="font-medium text-[var(--color-text)]">Domain:</span> {prep.company_intel.domain || 'Not stated in the posting'}</p>
+                    <p className="text-[var(--color-text-secondary)]"><span className="font-medium text-[var(--color-text)]">Industry:</span> {prep.company_intel.industry || 'Not stated in the posting'}</p>
+                    <p className="text-[var(--color-text-secondary)]"><span className="font-medium text-[var(--color-text)]">Mission:</span> {prep.company_intel.mission || 'Not stated in the posting'}</p>
+                    {prep.company_intel.team.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1"><span className="font-medium text-[var(--color-text)]">Teams:</span>
+                        {prep.company_intel.team.map((t, i) => <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/20">{t}</span>)}
+                      </div>
+                    )}
+                    {prep.company_intel.tech_stack.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1"><span className="font-medium text-[var(--color-text)]">Stack:</span>
+                        {prep.company_intel.tech_stack.map((t, i) => <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-brand/10 text-brand-light border border-brand/20">{t}</span>)}
+                      </div>
+                    )}
+                    {prep.company_intel.culture.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-1"><span className="font-medium text-[var(--color-text)]">Culture:</span>
+                        {prep.company_intel.culture.map((t, i) => <span key={i} className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/20">{t}</span>)}
+                      </div>
+                    )}
+                    {prep.company_intel.challenges.length > 0 && (
+                      <ul className="space-y-0.5 list-disc pl-4 text-[var(--color-text-secondary)]">
+                        {prep.company_intel.challenges.map((c, i) => <li key={i}>{c}</li>)}
+                      </ul>
+                    )}
+                  </div>
+                </div>
+
+                {/* Interview process */}
+                {prep.interview_process.length > 0 && (
+                  <div className="rounded-lg border border-[var(--color-border)] p-3">
+                    <div className="flex items-center gap-1.5 mb-2">
+                      <ListChecks className="w-3.5 h-3.5 text-emerald-400" />
+                      <span className="text-xs font-semibold">Likely Interview Process</span>
+                    </div>
+                    <ol className="space-y-1.5">
+                      {prep.interview_process.map((s, i) => (
+                        <li key={i} className="flex gap-2">
+                          <span className="w-4 h-4 shrink-0 rounded-full bg-emerald-500/20 text-emerald-300 text-[9px] font-bold flex items-center justify-center">{i + 1}</span>
+                          <div>
+                            <span className="text-xs font-medium">{s.step}</span>
+                            <span className="text-xs text-[var(--color-text-secondary)]"> — {s.detail}</span>
+                          </div>
+                        </li>
+                      ))}
+                    </ol>
+                  </div>
+                )}
+
+                {/* Value questions */}
+                {prep.value_questions.length > 0 && (
+                  <div className="rounded-lg border border-[var(--color-border)] p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold">The Questions They Almost Always Ask</span>
+                      <button onClick={() => toggleSection('value')} className="text-[10px] text-[var(--color-text-secondary)] flex items-center gap-0.5">
+                        {openSections.value ? <><ChevronUp className="w-3 h-3" /> Hide answers</> : <><ChevronDown className="w-3 h-3" /> Show answers</>}
+                      </button>
+                    </div>
+                    <div className="space-y-2">
+                      {prep.value_questions.map((q, i) => (
+                        <div key={i}>
+                          <div className="flex items-start gap-1.5">
+                            <Target className="w-3 h-3 text-violet-400 mt-1 shrink-0" />
+                            <span className="text-xs font-medium">{q.question}</span>
+                          </div>
+                          {openSections.value && (
+                            <div className="ml-4.5 mt-1 text-xs text-[var(--color-text-secondary)]">
+                              <p className="text-[10px] text-violet-400/70 mb-0.5">Why they ask: {q.why_asked}</p>
+                              <p>{q.suggested_answer}</p>
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Likely questions */}
+                {prep.likely_questions.length > 0 && (
+                  <div className="rounded-lg border border-[var(--color-border)] p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-xs font-semibold">More Likely Questions ({prep.likely_questions.length})</span>
+                      <button onClick={() => toggleSection('likely')} className="text-[10px] text-[var(--color-text-secondary)] flex items-center gap-0.5">
+                        {openSections.likely ? <><ChevronUp className="w-3 h-3" /> Hide</> : <><ChevronDown className="w-3 h-3" /> Show</>}
+                      </button>
+                    </div>
+                    {openSections.likely && (
+                      <div className="space-y-2.5">
+                        {prep.likely_questions.map((q, i) => (
+                          <div key={i}>
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="text-xs font-medium">{q.question}</span>
+                              <span className="text-[9px] uppercase tracking-wide px-1.5 py-0.5 rounded bg-surface text-[var(--color-text-secondary)] border border-[var(--color-border)] shrink-0">{q.type.replace('_', ' ')}</span>
+                            </div>
+                            <p className="text-[10px] text-violet-400/70 mt-0.5">Why they ask: {q.why_asked}</p>
+                            <p className="text-xs text-[var(--color-text-secondary)] mt-0.5">{q.suggested_answer}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Questions to ask + talking points + pitch */}
+                {(prep.questions_to_ask.length > 0 || prep.talking_points.length > 0 || prep.opening_pitch) && (
+                  <div className="grid sm:grid-cols-2 gap-3">
+                    {prep.questions_to_ask.length > 0 && (
+                      <div className="rounded-lg border border-[var(--color-border)] p-3">
+                        <span className="text-xs font-semibold block mb-1.5">Questions to Ask Them</span>
+                        <ul className="space-y-1.5">
+                          {prep.questions_to_ask.map((q, i) => (
+                            <li key={i}>
+                              <p className="text-xs">{q.question}</p>
+                              <p className="text-[10px] text-[var(--color-text-secondary)]">{q.why}</p>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {prep.talking_points.length > 0 && (
+                      <div className="rounded-lg border border-[var(--color-border)] p-3">
+                        <span className="text-xs font-semibold block mb-1.5">Company Talking Points</span>
+                        <ul className="space-y-1 list-disc pl-4">
+                          {prep.talking_points.map((t, i) => <li key={i} className="text-xs text-[var(--color-text-secondary)]">{t}</li>)}
+                        </ul>
+                      </div>
+                    )}
+                    {prep.opening_pitch && (
+                      <div className="rounded-lg border border-[var(--color-border)] p-3 sm:col-span-2">
+                        <span className="text-xs font-semibold block mb-1.5">60-Second Opening Pitch</span>
+                        <p className="text-xs text-[var(--color-text-secondary)] leading-relaxed">{prep.opening_pitch}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Already applied toggle in review step */}
           <div className="flex items-center justify-between neo-card p-3">
             <div className="flex items-center gap-2">
@@ -498,7 +716,7 @@ export default function CVJobMatch() {
 
           {/* Actions */}
           <div className="flex gap-3">
-            <button onClick={() => { setStep('input'); setTailored(null); }}
+            <button onClick={() => { setStep('input'); setTailored(null); setPrep(null); setPrepError(''); setOpenSections({}); }}
               className="flex-1 py-2.5 rounded-lg bg-[var(--color-surface)] border border-[var(--color-border)] text-sm">Start Over</button>
             <button onClick={handleSave} disabled={!hasCredits('create_cv')}
               title={`Saves the tailored CV · ${costOf('create_cv')} credit`}
