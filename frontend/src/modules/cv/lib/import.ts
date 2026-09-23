@@ -1,6 +1,6 @@
 import type { UserSettings } from '../../../lib/types';
 import type { CVProfile, CVExperience, CVEducation, CVSkill, CVCertification, CVProject, CVLanguage } from '../types';
-import { aiComplete } from '../../../lib/ai-client';
+import { aiComplete, extractJSON } from '../../../lib/ai-client';
 
 export interface ExtractedCV {
   profile: Partial<CVProfile>;
@@ -101,6 +101,7 @@ Return ONLY valid JSON with this structure:
 
 Rules:
 - Extract EVERYTHING you can find — be thorough
+- Return COMPACT JSON: no pretty-printing, no trailing commas, single-line strings
 - For experience: extract each role separately, parse bullet points into achievements array
 - For skills: categorize as Technical, Soft Skills, Tools, Frameworks, Languages, Databases, Cloud, Other
 - Proficiency: beginner, intermediate, advanced, expert (infer from context/years)
@@ -113,12 +114,10 @@ ${sourceRules}`;
 
   const userPrompt = `Extract all CV information from this text:\n\n${text.slice(0, 20000)}`;
 
-  const response = await aiComplete(userPrompt, { system: systemPrompt, maxTokens: 4096 });
+  const response = await aiComplete(userPrompt, { system: systemPrompt, maxTokens: 16000 });
 
-  const jsonMatch = response.match(/\{[\s\S]*\}/);
-  if (!jsonMatch) throw new Error('AI could not extract CV data');
-
-  const parsed = JSON.parse(jsonMatch[0]);
+  const parsed = extractJSON<ExtractedCV>(response);
+  if (!parsed || typeof parsed !== 'object') throw new Error('AI could not extract CV data');
 
   return {
     profile: {

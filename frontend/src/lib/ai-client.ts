@@ -14,6 +14,7 @@
  *   { text: string }
  */
 import { supabase } from './supabase';
+import { partialParse } from './partial-json';
 import type { CreditAction } from './types';
 
 export class InsufficientCreditsError extends Error {
@@ -63,13 +64,17 @@ export async function aiComplete(prompt: string, opts: AICallOptions = {}): Prom
   return text;
 }
 
-/** Parse a JSON object out of a Claude response that may be wrapped in markdown/prose. */
+/** Parse a JSON object out of a Claude response that may be wrapped in markdown/prose or truncated. */
 export function extractJSON<T = unknown>(text: string): T | null {
   const fence = text.match(/```json\s*([\s\S]*?)```/i)?.[1] ?? text.match(/```\s*([\s\S]*?)```/)?.[1];
   const candidate = (fence ?? text).trim();
   try { return JSON.parse(candidate) as T; } catch { /* fall through */ }
   const first = candidate.indexOf('{');
   const last  = candidate.lastIndexOf('}');
-  if (first === -1 || last === -1 || last <= first) return null;
-  try { return JSON.parse(candidate.slice(first, last + 1)) as T; } catch { return null; }
+  if (first > -1 && last > first) {
+    try { return JSON.parse(candidate.slice(first, last + 1)) as T; } catch { /* fall through */ }
+  }
+  // Last resort: tolerant parse of a possibly-truncated structure.
+  const recovered = partialParse(candidate) as T | null;
+  return recovered;
 }
