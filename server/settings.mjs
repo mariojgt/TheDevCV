@@ -10,8 +10,32 @@ import { encrypt, decrypt } from './crypto.mjs';
 import { getSessionSecret } from './auth.mjs';
 
 const SETTINGS_FILE = 'user_settings.json';
-const DEFAULT_MODEL = process.env.AI_MODEL || 'claude-opus-5';
+const DEFAULT_MODEL = process.env.AI_MODEL || 'claude-opus-5-5';
 let settingsWriteQueue = Promise.resolve();
+
+const DEFAULT_MODELS = [
+  { id: 'claude-opus-5-5', label: 'Claude Opus 5.5' },
+  { id: 'claude-opus-5', label: 'Claude Opus 5' },
+  { id: 'claude-fable-5', label: 'Claude Fable 5' },
+  { id: 'claude-sonnet-5', label: 'Claude Sonnet 5' },
+  { id: 'claude-haiku-4-5', label: 'Claude Haiku 4.5' },
+];
+
+export function availableModels() {
+  if (process.env.AI_MODELS) {
+    return process.env.AI_MODELS.split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((id) => ({ id, label: id }));
+  }
+  return DEFAULT_MODELS;
+}
+
+function anthropicClientOptions(apiKey, workspaceId) {
+  const opts = { apiKey };
+  if (workspaceId) opts.defaultHeaders = { 'anthropic-workspace-id': workspaceId };
+  return opts;
+}
 
 function settingsPath() {
   return path.join(store.dataDir(), SETTINGS_FILE);
@@ -49,6 +73,7 @@ function newSettingsRow(userId) {
     ai_provider: 'anthropic',
     ai_model: DEFAULT_MODEL,
     anthropic_api_key_encrypted: null,
+    anthropic_workspace_id: null,
     mcp_token: randomBytes(24).toString('base64url'),
     updated_at: new Date().toISOString(),
   };
@@ -100,6 +125,7 @@ export async function getPublicSettings(userId) {
     ai_enabled: aiConfigured,
     ai_provider: row.ai_provider ?? 'anthropic',
     ai_model: row.ai_model ?? DEFAULT_MODEL,
+    ai_models: availableModels(),
     ai_configured: aiConfigured,
     ai_source: source,
     ai_key_hint: keyHint,
@@ -107,25 +133,37 @@ export async function getPublicSettings(userId) {
   };
 }
 
-export async function setAnthropicKey(userId, apiKey) {
+export async function setAnthropicKey(userId, apiKey, workspaceId) {
   const key = String(apiKey ?? '').trim();
   if (!key.startsWith('sk-ant-') || key.length > 512) {
     const err = new Error('invalid_api_key');
     err.status = 400;
     throw err;
   }
+  const ws = String(workspaceId ?? '').trim();
 
-  const client = new Anthropic({ apiKey: key });
+  const client = new Anthropic(anthropicClientOptions(key, ws));
   try {
     await client.models.list({ limit: 1 });
   } catch (err) {
     if (err instanceof Anthropic.APIError && (err.status === 401 || err.status === 403)) {
       const e = new Error('invalid_api_key');
       e.status = 400;
+      e.detail = ws
+        ? 'Anthropic rejected this key. Check the key and workspace ID, then retry.'
+        : 'Anthropic rejected this key. Workspace-scoped keys (sk-ant-api03…) also need their workspace ID (wrk_…) saved below.';
       throw e;
     }
+    if (err instanceof Anthropic.APIError && err.message.includes('anthropic-workspace-id')) {
+      const e = new Error('anthropic_workspace_id_required');
+      e.status = 400;
+      e.detail = 'This key is scoped to an Anthropic workspace. Add its workspace ID (wrk_…) and try again, or use a standard API key.';
+      throw e;
+    }
+    console.error('[settings] key validation failed:', err instanceof Error ? err.message : err);
     const e = new Error('api_key_validation_failed');
     e.status = 502;
+    e.detail = err instanceof Error ? err.message : String(err);
     throw e;
   }
 
@@ -137,6 +175,31 @@ export async function setAnthropicKey(userId, apiKey) {
     const next = {
       ...(existing ?? newSettingsRow(userId)),
       anthropic_api_key_encrypted: encrypt(key, secret),
+      anthropic_workspace_id: ws || null,
+      updated_at: new Date().toISOString(),
+    };
+    if (idx >= 0) rows[idx] = next;
+    else rows.push(next);
+    await saveAll(rows);
+  });
+  return getPublicSettings(userId);
+}
+
+export async function setAiModel(userId, modelId) {
+  const id = String(modelId ?? '').trim();
+  const list = availableModels();
+  if (!id || (list.length && !list.some((model) => model.id === id))) {
+    const err = new Error('invalid_model');
+    err.status = 400;
+    err.detail = 'Choose a valid model from the list, or set AI_MODELS on the server to offer other options.';
+    throw err;
+  }
+  await withSettingsWrite(async () => {
+    const rows = await loadAll();
+    const idx = rows.findIndex((r) => r.user_id === userId);
+    const next = {
+      ...(idx >= 0 ? rows[idx] : newSettingsRow(userId)),
+      ai_model: id,
       updated_at: new Date().toISOString(),
     };
     if (idx >= 0) rows[idx] = next;
@@ -195,7 +258,11 @@ export async function getAnthropicClientForUser(userId) {
     try {
       const secret = await encryptionSecret();
       const apiKey = decrypt(row.anthropic_api_key_encrypted, secret);
-      return { client: new Anthropic({ apiKey }), model: row.ai_model ?? DEFAULT_MODEL, source: 'user' };
+      return {
+        client: new Anthropic(anthropicClientOptions(apiKey, row.anthropic_workspace_id)),
+        model: row.ai_model ?? DEFAULT_MODEL,
+        source: 'user',
+      };
     } catch (err) {
       console.error('[settings] failed to decrypt user API key:', err.message);
     }

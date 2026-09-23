@@ -15,7 +15,7 @@ import { handleMcpRequest } from './mcp.mjs';
 
 const PORT = Number(process.env.PORT || 8720);
 const HOST = process.env.HOST || '0.0.0.0';
-const AI_MODEL = process.env.AI_MODEL || 'claude-opus-5';
+const AI_MODEL = process.env.AI_MODEL || 'claude-opus-5-5';
 const STATIC_DIR = process.env.STATIC_DIR
   ? path.resolve(process.env.STATIC_DIR)
   : path.resolve(import.meta.dirname, '..', 'frontend', 'dist');
@@ -266,7 +266,12 @@ const server = http.createServer(async (req, res) => {
 
     if (pathname === '/api/settings/anthropic-key' && req.method === 'PUT') {
       const body = await readBody(req);
-      return json(res, await settings.setAnthropicKey(user.id, body?.api_key));
+      return json(res, await settings.setAnthropicKey(user.id, body?.api_key, body?.workspace_id));
+    }
+
+    if (pathname === '/api/settings/ai-model' && req.method === 'PUT') {
+      const body = await readBody(req);
+      return json(res, await settings.setAiModel(user.id, body?.ai_model));
     }
 
     if (pathname === '/api/settings/anthropic-key' && req.method === 'DELETE') {
@@ -347,8 +352,9 @@ const server = http.createServer(async (req, res) => {
     return serveStatic(req, res, pathname);
   } catch (err) {
     if ((err.status ?? 500) >= 500) console.error(`[server] ${req.method} ${pathname}:`, err);
-    if (!res.headersSent) json(res, { error: err.message ?? 'internal_error' }, err.status ?? 500);
-    else res.end();
+    if (!res.headersSent) {
+      json(res, { error: err.message ?? 'internal_error', ...(err.detail ? { detail: err.detail } : {}) }, err.status ?? 500);
+    } else res.end();
   }
 });
 

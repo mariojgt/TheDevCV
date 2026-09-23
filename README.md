@@ -32,7 +32,7 @@ Copy `.env.example` to `.env` when you need overrides:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `ANTHROPIC_API_KEY` | unset | Optional server-wide AI-key fallback shared by signed-in users |
-| `AI_MODEL` | `claude-opus-5` | Model used for AI requests |
+| `AI_MODEL` | `claude-opus-5-5` | Model used for AI requests |
 | `REGISTRATION_MODE` | `open` | `open`, `first-user`, or `disabled` |
 | `BOOTSTRAP_TOKEN` | generated in `data/.bootstrap-token` | One-time proof required to create the first account |
 | `COOKIE_SECURE` | `auto` | `auto`, `true`, or `false` for the session-cookie Secure flag |

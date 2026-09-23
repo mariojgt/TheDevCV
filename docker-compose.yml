@@ -3,14 +3,16 @@ services:
     build: .
     init: true
     ports:
-      - "8720:8720"
+      - "7894:8720"
     volumes:
       # All CV data lives here as plain JSON files — back up this folder.
       - ./data:/data
     environment:
       # Optional shared fallback. Users can instead save their own key in Settings.
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - AI_MODEL=${AI_MODEL:-claude-opus-5}
+      - AI_MODEL=${AI_MODEL:-claude-opus-5-5}
+      # Comma-separated list offered in the per-user "AI model" dropdown.
+      - AI_MODELS=${AI_MODELS:-claude-opus-5-5,claude-opus-5,claude-fable-5,claude-sonnet-5,claude-haiku-4-5}
       # open | first-user | disabled
       - REGISTRATION_MODE=${REGISTRATION_MODE:-open}
       # Optional owner-chosen token for creating the very first account.

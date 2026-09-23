@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type FormEvent } from 'react';
+import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import {
   Bot,
   Check,
@@ -20,6 +20,7 @@ import {
 import { useToast } from '../components/ui/Toast';
 import { useApp } from '../contexts/AppContext';
 import { useAuth } from '../contexts/AuthContext';
+import { DEFAULT_AI_MODELS } from '../lib/models';
 import { AUTH_EXPIRED_EVENT } from '../lib/supabase';
 
 interface Health {
@@ -44,8 +45,10 @@ const MCP_TOOLS = [
 ] as const;
 
 const SETTINGS_ERRORS: Record<string, string> = {
-  invalid_api_key: 'That key was rejected by Anthropic. Check it and try again.',
-  api_key_validation_failed: 'Anthropic could not validate the key right now. Please try again shortly.',
+  invalid_api_key: 'That key was rejected by Anthropic. Workspace-scoped keys (sk-ant-api03…) also need their workspace ID (wrk_…).',
+  anthropic_workspace_id_required: 'Workspace-scoped key detected: add its workspace ID (wrk_…) below, or use a standard API key.',
+  invalid_model: 'That model is not on the allowed list.',
+  api_key_validation_failed: 'Anthropic could not validate the key. Check the key / workspace and try again.',
   unauthorized: 'Your session expired. Sign in again.',
 };
 
@@ -86,7 +89,11 @@ async function settingsRequest(path: string, init?: RequestInit) {
   });
   const body = await response.json().catch(() => ({}));
   if (response.status === 401) window.dispatchEvent(new Event(AUTH_EXPIRED_EVENT));
-  if (!response.ok) throw new Error(body?.error ?? 'request_failed');
+  if (!response.ok) {
+    const err = new Error(body?.error ?? 'request_failed') as Error & { detail?: string };
+    err.detail = body?.detail;
+    throw err;
+  }
   return body;
 }
 
@@ -94,8 +101,10 @@ export default function Settings() {
   const [health, setHealth] = useState<Health | null>(null);
   const [healthError, setHealthError] = useState(false);
   const [apiKey, setApiKey] = useState('');
+  const [workspaceId, setWorkspaceId] = useState('');
   const [showKey, setShowKey] = useState(false);
   const [savingKey, setSavingKey] = useState(false);
+  const [savingModel, setSavingModel] = useState(false);
   const [removingKey, setRemovingKey] = useState(false);
   const [rotatingToken, setRotatingToken] = useState(false);
   const [downloadingBackup, setDownloadingBackup] = useState(false);
@@ -122,17 +131,42 @@ export default function Settings() {
     try {
       await settingsRequest('/api/settings/anthropic-key', {
         method: 'PUT',
-        body: JSON.stringify({ api_key: apiKey.trim() }),
+        body: JSON.stringify({
+          api_key: apiKey.trim(),
+          workspace_id: workspaceId.trim() || undefined,
+        }),
       });
       setApiKey('');
+      setWorkspaceId('');
       setShowKey(false);
       await refreshSettings();
       toast('Anthropic API key saved', 'success');
     } catch (error) {
       const code = error instanceof Error ? error.message : 'request_failed';
-      setKeyError(SETTINGS_ERRORS[code] ?? 'Could not save the API key.');
+      const detail = (error as { detail?: string } | null)?.detail;
+      setKeyError(SETTINGS_ERRORS[code] ?? detail ?? 'Could not save the API key.');
     } finally {
       setSavingKey(false);
+    }
+  };
+
+  const saveModel = async (model: string) => {
+    if (model === settings?.ai_model || savingModel) return;
+    setSavingModel(true);
+    try {
+      await settingsRequest('/api/settings/ai-model', {
+        method: 'PUT',
+        body: JSON.stringify({ ai_model: model }),
+      });
+      await refreshSettings();
+      const label = settings?.ai_models?.find((option) => option.id === model)?.label ?? model;
+      toast(`AI model set to ${label}`, 'success');
+    } catch (error) {
+      const code = error instanceof Error ? error.message : 'request_failed';
+      const detail = (error as { detail?: string } | null)?.detail;
+      toast(SETTINGS_ERRORS[code] ?? detail ?? 'Could not update the AI model.', 'error');
+    } finally {
+      setSavingModel(false);
     }
   };
 
@@ -212,6 +246,38 @@ export default function Settings() {
     : settings?.ai_source === 'env'
       ? `Server environment key · ends ${settings.ai_key_hint}`
       : 'No key saved';
+
+  let modelPicker: ReactNode = null;
+  if (settings?.ai_configured) {
+    const models = settings.ai_models?.length ? settings.ai_models : DEFAULT_AI_MODELS;
+    const options = settings.ai_model && !models.some((model) => model.id === settings.ai_model)
+      ? [{ id: settings.ai_model, label: settings.ai_model }, ...models]
+      : models;
+    modelPicker = (
+      <div className="space-y-2">
+        <label htmlFor="ai-model" className="text-[10px] font-bold uppercase tracking-wider text-subtle block">
+          AI model
+        </label>
+        <div className="flex items-center gap-2">
+          <select
+            id="ai-model"
+            value={settings?.ai_model ?? ''}
+            onChange={(event) => saveModel(event.target.value)}
+            disabled={savingModel}
+            className="neo-input w-full px-3 py-2.5 font-mono text-sm disabled:opacity-50"
+          >
+            {options.map((model) => (
+              <option key={model.id} value={model.id}>{model.label}</option>
+            ))}
+          </select>
+          {savingModel && <Loader2 className="w-4 h-4 animate-spin text-muted shrink-0" />}
+        </div>
+        <p className="text-xs text-muted">
+          Applied to AI rewrite, import, ATS tailoring and cover-letter requests for this account.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-8 max-w-3xl">
@@ -295,8 +361,29 @@ export default function Settings() {
               Validate & save
             </button>
           </div>
+          <div>
+            <label htmlFor="anthropic-workspace-id" className="text-[10px] font-bold uppercase tracking-wider text-subtle block">
+              Workspace ID <span className="text-subtle/70 font-medium normal-case">(only for workspace-scoped keys)</span>
+            </label>
+            <input
+              id="anthropic-workspace-id"
+              type="text"
+              value={workspaceId}
+              onChange={(event) => setWorkspaceId(event.target.value)}
+              placeholder="wrk_…"
+              autoComplete="off"
+              spellCheck={false}
+              className="neo-input w-full px-3 py-2.5 font-mono text-sm"
+            />
+          </div>
+          <p className="text-xs text-muted">
+            Keys starting with <code className="text-brand-light">sk-ant-api03…</code> belong to a workspace and must be paired with its
+            workspace ID (<code className="text-brand-light">wrk_…</code>). Standard <code className="text-brand-light">sk-ant-api02…</code> keys don't need it.
+          </p>
           {keyError && <p role="alert" className="text-xs text-red-400">{keyError}</p>}
         </form>
+
+        {modelPicker}
 
         {settings?.ai_source === 'user' && (
           <button

@@ -1,12 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 import { type CreditAction, type UserSettings } from '../lib/types';
+import { DEFAULT_AI_MODELS } from '../lib/models';
 import { AUTH_EXPIRED_EVENT, setAuthUser } from '../lib/supabase';
 
 interface AppSettings extends UserSettings {
   ai_configured?: boolean;
   ai_source?: 'user' | 'env' | 'none';
   ai_key_hint?: string | null;
+  ai_models?: { id: string; label: string }[];
   mcp_token?: string;
 }
 
@@ -58,7 +60,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
         theme: data.theme ?? 'dark',
         ai_enabled: data.ai_enabled ?? false,
         ai_provider: data.ai_provider ?? 'anthropic',
-        ai_model: data.ai_model ?? 'claude-opus-5',
+        ai_model: data.ai_model ?? 'claude-opus-5-5',
+        ai_models: data.ai_models?.length ? data.ai_models : DEFAULT_AI_MODELS,
         encrypted_api_key: data.ai_configured ? 'configured' : '',
         ai_configured: data.ai_configured,
         ai_source: data.ai_source,
